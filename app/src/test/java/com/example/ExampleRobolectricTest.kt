@@ -62,4 +62,10 @@ class ExampleRobolectricTest {
         assertEquals(1000, scoring.totalScore)
         assertEquals(0f, scoring.currentComboScore)
     }
+
+    @Test
+    fun `test main activity launch`() {
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+        assertNotNull(controller.get())
+    }
 }

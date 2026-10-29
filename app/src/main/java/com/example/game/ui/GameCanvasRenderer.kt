@@ -209,14 +209,15 @@ class GameCanvasRenderer {
         val center = track.centerLine
         val inner = track.innerBoundary
         val outer = track.outerBoundary
-        if (center.size < 2) return
+        val numSegments = minOf(center.size, inner.size, outer.size)
+        if (numSegments < 2) return
 
         val curbColors = listOf(NeonMagenta, Color.White, NeonCyan, NeonYellow)
 
         // Draw track segments
         val step = 1
-        for (i in 0 until center.size - 1 step step) {
-            val nextIdx = (i + 1) % center.size
+        for (i in 0 until numSegments - 1 step step) {
+            val nextIdx = (i + 1) % numSegments
 
             val o1 = cam.project(outer[i].x, outer[i].y, 0f)
             val o2 = cam.project(outer[nextIdx].x, outer[nextIdx].y, 0f)
