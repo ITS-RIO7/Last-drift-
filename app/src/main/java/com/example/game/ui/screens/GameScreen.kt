@@ -72,6 +72,8 @@ fun GameScreen(
     var isPaused by remember { mutableStateOf(false) }
     var isSessionFinished by remember { mutableStateOf(false) }
     var isNewRecord by remember { mutableStateOf(false) }
+    // Rendering & HUD throttle states
+    var frameTick by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     var remainingTimeSec by remember { mutableFloatStateOf(mode.defaultTimeLimitSec) }
 
     // Session reset function
@@ -92,9 +94,11 @@ fun GameScreen(
         }
     }
 
-    // 60FPS Game Loop
+    // High performance 60FPS Game Loop with throttled Compose updates
     LaunchedEffect(isPaused, isSessionFinished) {
         var lastNanoTime = System.nanoTime()
+        var lastHudNanoTime = System.nanoTime()
+        var internalRemainingTime = mode.defaultTimeLimitSec
 
         while (!isPaused && !isSessionFinished) {
             withFrameNanos { now ->
@@ -141,9 +145,10 @@ fun GameScreen(
 
                 // Session rules check
                 if (!mode.defaultTimeLimitSec.isInfinite()) {
-                    remainingTimeSec -= dt
-                    if (remainingTimeSec <= 0f) {
+                    internalRemainingTime -= dt
+                    if (internalRemainingTime <= 0f) {
                         scoring.finalizeScore()
+                        remainingTimeSec = 0f
                         isSessionFinished = true
                     }
                 }
@@ -153,6 +158,15 @@ fun GameScreen(
                     scoring.finalizeScore()
                     isSessionFinished = true
                 }
+
+                // Throttle HUD recompositions to 10Hz (every 100ms) to eliminate Compose UI thread lag
+                if (now - lastHudNanoTime >= 100_000_000L) {
+                    lastHudNanoTime = now
+                    remainingTimeSec = internalRemainingTime
+                }
+
+                // Drive smooth 60 FPS GPU canvas draw loop
+                frameTick++
             }
         }
     }
@@ -175,8 +189,9 @@ fun GameScreen(
             .fillMaxSize()
             .testTag("game_screen_container")
     ) {
-        // World Canvas Rendering
+        // World Canvas Rendering driven at 60 FPS
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val tick = frameTick
             renderer.draw(
                 drawScope = this,
                 physics = physics,

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -41,22 +42,24 @@ fun MiniMap(
             .border(1.5.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp))
             .testTag("game_minimap")
     ) {
+        val trackPath = remember { Path() }
+        val arrowPath = remember { Path() }
+
         Canvas(modifier = Modifier.matchParentSize()) {
             val scaleX = size.width / track.worldWidth
             val scaleY = size.height / track.worldHeight
 
             // Draw track path
             if (track.centerLine.isNotEmpty()) {
-                val path = Path().apply {
-                    val first = track.centerLine[0]
-                    moveTo(first.x * scaleX, first.y * scaleY)
-                    for (i in 1 until track.centerLine.size) {
-                        val pt = track.centerLine[i]
-                        lineTo(pt.x * scaleX, pt.y * scaleY)
-                    }
+                trackPath.reset()
+                val first = track.centerLine[0]
+                trackPath.moveTo(first.x * scaleX, first.y * scaleY)
+                for (i in 1 until track.centerLine.size) {
+                    val pt = track.centerLine[i]
+                    trackPath.lineTo(pt.x * scaleX, pt.y * scaleY)
                 }
                 drawPath(
-                    path = path,
+                    path = trackPath,
                     color = Color(0x66FFFFFF),
                     style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
                 )
@@ -77,14 +80,14 @@ fun MiniMap(
             val headingDeg = physics.heading * (180f / PI.toFloat())
 
             rotate(headingDeg, Offset(playerMapX, playerMapY)) {
-                val arrow = Path().apply {
-                    moveTo(playerMapX + 6f, playerMapY)
-                    lineTo(playerMapX - 4f, playerMapY - 4f)
-                    lineTo(playerMapX - 2f, playerMapY)
-                    lineTo(playerMapX - 4f, playerMapY + 4f)
-                    close()
-                }
-                drawPath(path = arrow, color = NeonOrange, style = Fill)
+                arrowPath.reset()
+                arrowPath.moveTo(playerMapX + 6f, playerMapY)
+                arrowPath.lineTo(playerMapX - 4f, playerMapY - 4f)
+                arrowPath.lineTo(playerMapX - 2f, playerMapY)
+                arrowPath.lineTo(playerMapX - 4f, playerMapY + 4f)
+                arrowPath.close()
+
+                drawPath(path = arrowPath, color = NeonOrange, style = Fill)
                 drawCircle(
                     color = NeonYellow,
                     radius = 2.5f,

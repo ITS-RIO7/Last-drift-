@@ -57,7 +57,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun DriftHorizonApp(storage: GameStorage) {
-    var currentScreen by remember { mutableStateOf(AppScreen.MAIN_MENU) }
+    // Open directly into the Garage screen as requested by user
+    var currentScreen by remember { mutableStateOf(AppScreen.GARAGE) }
 
     // Load active car
     var equippedCar by remember {
@@ -75,18 +76,30 @@ fun DriftHorizonApp(storage: GameStorage) {
     var selectedMode by remember { mutableStateOf(GameMode.DRIFT_ATTACK) }
 
     when (currentScreen) {
-        AppScreen.MAIN_MENU -> {
-            MainMenuScreen(
-                currentCar = equippedCar,
-                currentTrack = selectedTrack,
-                currentMode = selectedMode,
+        AppScreen.GARAGE -> {
+            GarageScreen(
                 storage = storage,
-                onStartDrift = { currentScreen = AppScreen.GAME },
-                onOpenGarage = { currentScreen = AppScreen.GARAGE },
-                onOpenTracks = { currentScreen = AppScreen.TRACK_SELECT },
+                selectedTrack = selectedTrack,
+                selectedMode = selectedMode,
+                onTrackChange = {
+                    selectedTrack = it
+                    storage.selectedTrackId = it.id
+                },
+                onModeChange = { selectedMode = it },
+                onStartDrift = { car, track, mode ->
+                    equippedCar = car
+                    selectedTrack = track
+                    selectedMode = mode
+                    currentScreen = AppScreen.GAME
+                },
                 onOpenRecords = { currentScreen = AppScreen.RECORDS },
                 onOpenSettings = { currentScreen = AppScreen.SETTINGS }
             )
+        }
+
+        AppScreen.MAIN_MENU -> {
+            // Main menu redirects to garage
+            currentScreen = AppScreen.GARAGE
         }
 
         AppScreen.GAME -> {
@@ -99,21 +112,7 @@ fun DriftHorizonApp(storage: GameStorage) {
                     // Reload car state in case stats or paints changed
                     val baseCar = Car.DEFAULT_CARS.firstOrNull { it.id == storage.equippedCarId } ?: Car.DEFAULT_CARS[0]
                     equippedCar = storage.loadCarWithUpgrades(baseCar)
-                    currentScreen = AppScreen.MAIN_MENU
-                }
-            )
-        }
-
-        AppScreen.GARAGE -> {
-            GarageScreen(
-                storage = storage,
-                onBack = {
-                    val baseCar = Car.DEFAULT_CARS.firstOrNull { it.id == storage.equippedCarId } ?: Car.DEFAULT_CARS[0]
-                    equippedCar = storage.loadCarWithUpgrades(baseCar)
-                    currentScreen = AppScreen.MAIN_MENU
-                },
-                onEquipCar = { newCar ->
-                    equippedCar = newCar
+                    currentScreen = AppScreen.GARAGE
                 }
             )
         }
@@ -123,24 +122,27 @@ fun DriftHorizonApp(storage: GameStorage) {
                 storage = storage,
                 selectedTrack = selectedTrack,
                 selectedMode = selectedMode,
-                onTrackSelect = { selectedTrack = it },
+                onTrackSelect = {
+                    selectedTrack = it
+                    storage.selectedTrackId = it.id
+                },
                 onModeSelect = { selectedMode = it },
                 onStartGame = { currentScreen = AppScreen.GAME },
-                onBack = { currentScreen = AppScreen.MAIN_MENU }
+                onBack = { currentScreen = AppScreen.GARAGE }
             )
         }
 
         AppScreen.RECORDS -> {
             RecordsScreen(
                 storage = storage,
-                onBack = { currentScreen = AppScreen.MAIN_MENU }
+                onBack = { currentScreen = AppScreen.GARAGE }
             )
         }
 
         AppScreen.SETTINGS -> {
             SettingsScreen(
                 storage = storage,
-                onBack = { currentScreen = AppScreen.MAIN_MENU }
+                onBack = { currentScreen = AppScreen.GARAGE }
             )
         }
     }

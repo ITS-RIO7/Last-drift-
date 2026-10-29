@@ -1,15 +1,22 @@
 package com.example.game.ui.screens
 
-import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,12 +29,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Upgrade
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,11 +46,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,34 +60,47 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.game.model.Car
+import com.example.game.model.GameMode
+import com.example.game.model.Track
 import com.example.game.storage.GameStorage
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonGreen
+import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NeonOrange
 import com.example.ui.theme.NeonYellow
 import com.example.ui.theme.NitroBlue
 import com.example.ui.theme.RacingCard
 import com.example.ui.theme.RacingDark
+import com.example.ui.theme.RacingSurface
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun GarageScreen(
     storage: GameStorage,
-    onBack: () -> Unit,
-    onEquipCar: (Car) -> Unit,
+    selectedTrack: Track,
+    selectedMode: GameMode,
+    onTrackChange: (Track) -> Unit,
+    onModeChange: (GameMode) -> Unit,
+    onStartDrift: (Car, Track, GameMode) -> Unit,
+    onOpenRecords: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    BackHandler { onBack() }
-
-    // Load available cars from storage
     var playerCoins by remember { mutableIntStateOf(storage.coins) }
     var equippedId by remember { mutableStateOf(storage.equippedCarId) }
 
@@ -90,6 +114,19 @@ fun GarageScreen(
     }
 
     val selectedCar = allCars[selectedCarIndex]
+
+    // Turntable smooth auto-rotation
+    val infiniteTransition = rememberInfiniteTransition(label = "podium_spin")
+    val autoAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 16000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "podium_rot"
+    )
+    var dragAngleOffset by remember { mutableFloatStateOf(0f) }
 
     val paintColors = listOf(
         0xFFECEFF1 to "Panda White",
@@ -125,562 +162,425 @@ fun GarageScreen(
             .background(RacingDark)
             .testTag("garage_screen")
     ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)
-        ) {
-            // Top Bar
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 24.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ================= TOP BAR (Landscape Compact) =================
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .background(RacingSurface)
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Title
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = null,
+                        tint = NeonOrange,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "DRIFT HORIZON",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                // Center: Track & Mode Quick Selector Pill
+                Surface(
+                    color = RacingCard,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                    modifier = Modifier.clickable {
+                        // Cycle through tracks on click
+                        val curIdx = Track.ALL_TRACKS.indexOfFirst { it.id == selectedTrack.id }
+                        val nextTrack = Track.ALL_TRACKS[(curIdx + 1) % Track.ALL_TRACKS.size]
+                        storage.selectedTrackId = nextTrack.id
+                        onTrackChange(nextTrack)
+                    }
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = onBack,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(RacingCard)
-                                .testTag("garage_back_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back to Menu",
-                                tint = TextPrimary
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
                         Text(
-                            text = "DRIFT GARAGE",
-                            color = Color.White,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
+                            text = "🏁 ${selectedTrack.name}",
+                            color = NeonCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "• ${selectedMode.title}",
+                            color = TextMuted,
+                            fontSize = 11.sp
                         )
                     }
+                }
 
-                    // Coins Pill
+                // Right Actions: Coins, Records, Settings
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         color = RacingCard,
-                        shape = RoundedCornerShape(20.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonYellow.copy(alpha = 0.6f))
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonYellow.copy(alpha = 0.5f))
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
-                            Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = NeonYellow, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(text = "$playerCoins", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                            Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = NeonYellow, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "$playerCoins", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
                         }
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    IconButton(
+                        onClick = onOpenRecords,
+                        modifier = Modifier.size(32.dp).testTag("garage_records_button")
+                    ) {
+                        Icon(Icons.Default.EmojiEvents, contentDescription = "Records", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                    }
+
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.size(32.dp).testTag("garage_settings_button")
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextPrimary, modifier = Modifier.size(18.dp))
                     }
                 }
             }
 
-            // Horizontal Car Carousel Tabs
-            item {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(allCars.indices.toList()) { index ->
-                        val car = allCars[index]
-                        val isSelected = index == selectedCarIndex
-                        val isEquipped = car.id == equippedId
-
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) Color(0xFF261D15) else RacingCard
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.5.dp,
-                                if (isSelected) NeonOrange else Color(0x22FFFFFF)
-                            ),
-                            modifier = Modifier
-                                .clickable { selectedCarIndex = index }
-                                .testTag("car_tab_${car.id}")
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                if (!car.isUnlocked) {
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = "Locked",
-                                        tint = TextMuted,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                } else if (isEquipped) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Equipped",
-                                        tint = NeonGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                }
-
-                                Text(
-                                    text = car.name,
-                                    color = if (isSelected) NeonOrange else TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Car Visual Render Showcase
-            item {
+            // ================= MAIN LANDSCAPE BODY (3 COLUMNS) =================
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // ================= LEFT COLUMN: CARS & UPGRADES =================
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .width(235.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RacingSurface)
+                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(14.dp))
+                        .padding(8.dp)
                 ) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = RacingCard),
-                        shape = RoundedCornerShape(22.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0x33FFFFFF)),
+                    Text(
+                        text = "GARAGE CARS",
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Car selection list
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(allCars.indices.toList()) { index ->
+                            val car = allCars[index]
+                            val isSelected = index == selectedCarIndex
+                            val isEquipped = car.id == equippedId
+
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) Color(0xFF281C14) else RacingCard
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isSelected) NeonOrange else Color(0x1AFFFFFF)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedCarIndex = index
+                                        if (car.isUnlocked) {
+                                            storage.equippedCarId = car.id
+                                            equippedId = car.id
+                                        }
+                                    }
+                                    .testTag("car_card_${car.id}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = car.name,
+                                            color = if (isSelected) NeonOrange else TextPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                        Text(
+                                            text = car.series,
+                                            color = TextMuted,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+
+                                    if (isEquipped) {
+                                        Surface(color = NeonGreen.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                            Text("EQUIPPED", color = NeonGreen, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                        }
+                                    } else if (!car.isUnlocked) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Lock, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Text("${car.basePrice}", color = NeonYellow, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tuning Station Header
+                        item {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "PERFORMANCE TUNING",
+                                color = TextMuted,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        // Tuning rows
+                        item {
+                            val upgradeCostBase = 500
+                            LandscapeUpgradeItem(
+                                title = "ENGINE / TURBO",
+                                level = selectedCar.engineLevel,
+                                cost = upgradeCostBase * (selectedCar.engineLevel + 1),
+                                canAfford = playerCoins >= (upgradeCostBase * (selectedCar.engineLevel + 1)),
+                                onUpgrade = {
+                                    val cost = upgradeCostBase * (selectedCar.engineLevel + 1)
+                                    if (playerCoins >= cost && selectedCar.engineLevel < 3) {
+                                        storage.coins -= cost
+                                        storage.setCarEngineLevel(selectedCar.id, selectedCar.engineLevel + 1)
+                                        playerCoins = storage.coins
+                                    }
+                                }
+                            )
+                        }
+
+                        item {
+                            val upgradeCostBase = 500
+                            LandscapeUpgradeItem(
+                                title = "DRIFT ANGLE KIT",
+                                level = selectedCar.driftKitLevel,
+                                cost = upgradeCostBase * (selectedCar.driftKitLevel + 1),
+                                canAfford = playerCoins >= (upgradeCostBase * (selectedCar.driftKitLevel + 1)),
+                                onUpgrade = {
+                                    val cost = upgradeCostBase * (selectedCar.driftKitLevel + 1)
+                                    if (playerCoins >= cost && selectedCar.driftKitLevel < 3) {
+                                        storage.coins -= cost
+                                        storage.setCarDriftKitLevel(selectedCar.id, selectedCar.driftKitLevel + 1)
+                                        playerCoins = storage.coins
+                                    }
+                                }
+                            )
+                        }
+
+                        item {
+                            val upgradeCostBase = 500
+                            LandscapeUpgradeItem(
+                                title = "DRIFT TIRES",
+                                level = selectedCar.tireLevel,
+                                cost = upgradeCostBase * (selectedCar.tireLevel + 1),
+                                canAfford = playerCoins >= (upgradeCostBase * (selectedCar.tireLevel + 1)),
+                                onUpgrade = {
+                                    val cost = upgradeCostBase * (selectedCar.tireLevel + 1)
+                                    if (playerCoins >= cost && selectedCar.tireLevel < 3) {
+                                        storage.coins -= cost
+                                        storage.setCarTireLevel(selectedCar.id, selectedCar.tireLevel + 1)
+                                        playerCoins = storage.coins
+                                    }
+                                }
+                            )
+                        }
+
+                        item {
+                            val upgradeCostBase = 500
+                            LandscapeUpgradeItem(
+                                title = "NITROUS (NOS)",
+                                level = selectedCar.nitroLevel,
+                                cost = upgradeCostBase * (selectedCar.nitroLevel + 1),
+                                canAfford = playerCoins >= (upgradeCostBase * (selectedCar.nitroLevel + 1)),
+                                onUpgrade = {
+                                    val cost = upgradeCostBase * (selectedCar.nitroLevel + 1)
+                                    if (playerCoins >= cost && selectedCar.nitroLevel < 3) {
+                                        storage.coins -= cost
+                                        storage.setCarNitroLevel(selectedCar.id, selectedCar.nitroLevel + 1)
+                                        playerCoins = storage.coins
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // ================= CENTER COLUMN: 3D CAR & PLAY BUTTON =================
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Car Title Header
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            color = NeonOrange,
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.padding(end = 6.dp)
+                        ) {
+                            Text(
+                                text = selectedCar.series.uppercase(),
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                        Text(
+                            text = selectedCar.name,
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    // 3D Rotating Turntable Stage
+                    Box(
                         modifier = Modifier
+                            .weight(1f)
                             .fillMaxWidth()
-                            .height(200.dp)
+                            .pointerInput(Unit) {
+                                detectDragGestures { _, dragAmount ->
+                                    dragAngleOffset += dragAmount.x * 0.5f
+                                }
+                            }
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            // Canvas Car Showcase
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val cx = size.width / 2f
-                                val cy = size.height / 2f
+                        val totalAngle = autoAngle + dragAngleOffset
 
-                                // Showcase podium spotlight
-                                drawOval(
-                                    color = Color(selectedCar.accentColor).copy(alpha = 0.25f),
-                                    topLeft = Offset(cx - 130f, cy - 65f),
-                                    size = Size(260f, 130f)
-                                )
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val cx = size.width * 0.5f
+                            val cy = size.height * 0.55f
 
-                                // Car shadow
-                                drawRoundRect(
-                                    color = Color(0x99000000),
-                                    topLeft = Offset(cx - 85f, cy - 40f),
-                                    size = Size(170f, 80f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f)
-                                )
+                            // Illuminated Neon Turntable Podium
+                            drawOval(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(selectedCar.underglowColor).copy(alpha = 0.5f),
+                                        Color(0x22000000),
+                                        Color.Transparent
+                                    ),
+                                    center = Offset(cx, cy),
+                                    radius = 160f
+                                ),
+                                topLeft = Offset(cx - 150f, cy - 65f),
+                                size = Size(300f, 130f)
+                            )
 
-                                // Underglow
-                                drawRoundRect(
-                                    color = Color(selectedCar.accentColor).copy(alpha = 0.6f),
-                                    topLeft = Offset(cx - 85f, cy - 44f),
-                                    size = Size(170f, 88f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f)
-                                )
+                            // Podium Rim
+                            drawOval(
+                                color = Color(selectedCar.underglowColor),
+                                topLeft = Offset(cx - 130f, cy - 50f),
+                                size = Size(260f, 100f),
+                                style = Stroke(width = 2.5f)
+                            )
 
-                                // Wheels
-                                drawRoundRect(
-                                    color = Color(0xFF111317),
-                                    topLeft = Offset(cx - 65f, cy - 48f),
-                                    size = Size(32f, 14f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
-                                )
-                                drawRoundRect(
-                                    color = Color(0xFF111317),
-                                    topLeft = Offset(cx - 65f, cy + 34f),
-                                    size = Size(32f, 14f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
-                                )
-                                drawRoundRect(
-                                    color = Color(0xFF111317),
-                                    topLeft = Offset(cx + 33f, cy - 48f),
-                                    size = Size(32f, 14f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
-                                )
-                                drawRoundRect(
-                                    color = Color(0xFF111317),
-                                    topLeft = Offset(cx + 33f, cy + 34f),
-                                    size = Size(32f, 14f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
-                                )
-
-                                // Car body
-                                drawRoundRect(
-                                    color = Color(selectedCar.bodyColor),
-                                    topLeft = Offset(cx - 80f, cy - 40f),
-                                    size = Size(160f, 80f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f)
-                                )
-
-                                // Racing stripe
-                                drawRect(
-                                    color = Color(selectedCar.accentColor),
-                                    topLeft = Offset(cx - 75f, cy - 14f),
-                                    size = Size(150f, 28f)
-                                )
-
-                                // Windshields
-                                drawRoundRect(
-                                    color = Color(0xFF1E293B),
-                                    topLeft = Offset(cx + 8f, cy - 30f),
-                                    size = Size(36f, 60f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-                                )
-                                drawRoundRect(
-                                    color = Color(0xFF1E293B),
-                                    topLeft = Offset(cx - 52f, cy - 28f),
-                                    size = Size(28f, 56f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-                                )
-
-                                // Spoiler
-                                drawRoundRect(
-                                    color = Color(selectedCar.accentColor),
-                                    topLeft = Offset(cx - 84f, cy - 38f),
-                                    size = Size(10f, 76f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
-                                )
-                            }
-
-                            // Car Series Tag
-                            Surface(
-                                color = Color(0x99000000),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(12.dp)
-                            ) {
-                                Text(
-                                    text = selectedCar.series,
-                                    color = NeonCyan,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Black,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
+                            // Draw 3D Isometric Rotating Car
+                            draw3DShowcaseCar(
+                                cx = cx,
+                                cy = cy,
+                                rotAngleDeg = totalAngle,
+                                car = selectedCar
+                            )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = selectedCar.name,
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Text(
-                        text = selectedCar.description,
-                        color = TextMuted,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            // Paint Shop (Livery Color Picker)
-            item {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Palette, contentDescription = null, tint = NeonOrange, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
+                        // Touch hint
                         Text(
-                            text = "CUSTOM PAINT FINISH",
-                            color = TextMuted,
-                            fontSize = 11.sp,
+                            text = "DRAG TO SPIN 360°",
+                            color = TextMuted.copy(alpha = 0.5f),
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 4.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(paintColors) { (colorHex, name) ->
-                            val isCurrentColor = selectedCar.bodyColor == colorHex
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(colorHex))
-                                    .border(
-                                        2.dp,
-                                        if (isCurrentColor) NeonOrange else Color(0x44FFFFFF),
-                                        CircleShape
-                                    )
-                                    .clickable {
-                                        storage.setCarCustomPaint(selectedCar.id, colorHex)
-                                        playerCoins = storage.coins
-                                    }
-                                    .testTag("paint_color_${colorHex}")
-                            ) {
-                                if (isCurrentColor) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = name,
-                                        tint = if (colorHex == 0xFFECEFF1 || colorHex == 0xFFFFD600 || colorHex == 0xFF76FF03) Color.Black else Color.White,
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .align(Alignment.Center)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Underglow Neon Color Selector
-                    Text(
-                        text = "NEON UNDERGLOW",
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(underglowColors) { (colorHex, name) ->
-                            val isCurrentUnderglow = selectedCar.underglowColor == colorHex
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(colorHex))
-                                    .border(
-                                        2.dp,
-                                        if (isCurrentUnderglow) Color.White else Color(0x33FFFFFF),
-                                        CircleShape
-                                    )
-                                    .clickable {
-                                        storage.setCarUnderglowColor(selectedCar.id, colorHex)
-                                        playerCoins = storage.coins
-                                    }
-                                    .testTag("underglow_color_${colorHex}")
-                            ) {
-                                if (isCurrentUnderglow) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = name,
-                                        tint = if (colorHex == 0xFFFFD600 || colorHex == 0xFF00E676) Color.Black else Color.White,
-                                        modifier = Modifier.size(18.dp).align(Alignment.Center)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Tire Smoke Color Selector
-                    Text(
-                        text = "TIRE SMOKE COLOR",
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(smokeColors) { (colorHex, name) ->
-                            val isCurrentSmoke = selectedCar.smokeColor == colorHex
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(colorHex))
-                                    .border(
-                                        2.dp,
-                                        if (isCurrentSmoke) Color.White else Color(0x33FFFFFF),
-                                        CircleShape
-                                    )
-                                    .clickable {
-                                        storage.setCarSmokeColor(selectedCar.id, colorHex)
-                                        playerCoins = storage.coins
-                                    }
-                                    .testTag("smoke_color_${colorHex}")
-                            ) {
-                                if (isCurrentSmoke) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = name,
-                                        tint = if (colorHex == 0xFFFFFFFF || colorHex == 0xFFFFD600) Color.Black else Color.White,
-                                        modifier = Modifier.size(18.dp).align(Alignment.Center)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Performance Telemetry Stats
-            item {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Text(
-                        text = "PERFORMANCE SPECS",
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
+                    // Car Specs Summary Pills
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    StatBar(name = "TOP SPEED", value = selectedCar.topSpeed, maxValue = 650f, color = NeonOrange)
-                    StatBar(name = "ACCELERATION", value = selectedCar.acceleration, maxValue = 600f, color = NeonYellow)
-                    StatBar(name = "DRIFT ANGLE FACTOR", value = selectedCar.driftFactor, maxValue = 2.0f, color = NeonCyan)
-                    StatBar(name = "NITRO DURATION", value = selectedCar.nitroDurationSec, maxValue = 7.0f, color = NitroBlue)
-                }
-            }
-
-            // Upgrades Tuning Station
-            item {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Upgrade, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "PERFORMANCE UPGRADES",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
+                    ) {
+                        SpecPill("SPEED", "${selectedCar.topSpeed.toInt()} KM/H", NeonOrange)
+                        SpecPill("ACCEL", "${selectedCar.acceleration.toInt()}", NeonYellow)
+                        SpecPill("DRIFT", "${String.format("%.2f", selectedCar.driftFactor)}x", NeonCyan)
+                        SpecPill("NITRO", "${String.format("%.1f", selectedCar.nitroDurationSec)}s", NitroBlue)
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    val upgradeCostBase = 500
-
-                    UpgradeRow(
-                        title = "TURBO & ENGINE",
-                        description = "+8% Top Speed, +10% Acceleration",
-                        currentLevel = selectedCar.engineLevel,
-                        cost = (upgradeCostBase * (selectedCar.engineLevel + 1)),
-                        canAfford = playerCoins >= (upgradeCostBase * (selectedCar.engineLevel + 1)),
-                        isMax = selectedCar.engineLevel >= 3,
-                        onUpgrade = {
-                            val cost = upgradeCostBase * (selectedCar.engineLevel + 1)
-                            if (playerCoins >= cost && selectedCar.engineLevel < 3) {
-                                storage.coins -= cost
-                                storage.setCarEngineLevel(selectedCar.id, selectedCar.engineLevel + 1)
-                                playerCoins = storage.coins
-                            }
-                        },
-                        testTag = "upgrade_engine"
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    UpgradeRow(
-                        title = "DRIFT STEERING KIT",
-                        description = "+12% Slip Angle, +8% Counter-Steer Agility",
-                        currentLevel = selectedCar.driftKitLevel,
-                        cost = (upgradeCostBase * (selectedCar.driftKitLevel + 1)),
-                        canAfford = playerCoins >= (upgradeCostBase * (selectedCar.driftKitLevel + 1)),
-                        isMax = selectedCar.driftKitLevel >= 3,
-                        onUpgrade = {
-                            val cost = upgradeCostBase * (selectedCar.driftKitLevel + 1)
-                            if (playerCoins >= cost && selectedCar.driftKitLevel < 3) {
-                                storage.coins -= cost
-                                storage.setCarDriftKitLevel(selectedCar.id, selectedCar.driftKitLevel + 1)
-                                playerCoins = storage.coins
-                            }
-                        },
-                        testTag = "upgrade_drift_kit"
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    UpgradeRow(
-                        title = "DRIFT COMPOUND TIRES",
-                        description = "+Grip Balance & High-Speed Slide Control",
-                        currentLevel = selectedCar.tireLevel,
-                        cost = (upgradeCostBase * (selectedCar.tireLevel + 1)),
-                        canAfford = playerCoins >= (upgradeCostBase * (selectedCar.tireLevel + 1)),
-                        isMax = selectedCar.tireLevel >= 3,
-                        onUpgrade = {
-                            val cost = upgradeCostBase * (selectedCar.tireLevel + 1)
-                            if (playerCoins >= cost && selectedCar.tireLevel < 3) {
-                                storage.coins -= cost
-                                storage.setCarTireLevel(selectedCar.id, selectedCar.tireLevel + 1)
-                                playerCoins = storage.coins
-                            }
-                        },
-                        testTag = "upgrade_tires"
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    UpgradeRow(
-                        title = "NITROUS SYSTEM (NOS)",
-                        description = "+1.0s Boost Duration & Rapid Recharge",
-                        currentLevel = selectedCar.nitroLevel,
-                        cost = (upgradeCostBase * (selectedCar.nitroLevel + 1)),
-                        canAfford = playerCoins >= (upgradeCostBase * (selectedCar.nitroLevel + 1)),
-                        isMax = selectedCar.nitroLevel >= 3,
-                        onUpgrade = {
-                            val cost = upgradeCostBase * (selectedCar.nitroLevel + 1)
-                            if (playerCoins >= cost && selectedCar.nitroLevel < 3) {
-                                storage.coins -= cost
-                                storage.setCarNitroLevel(selectedCar.id, selectedCar.nitroLevel + 1)
-                                playerCoins = storage.coins
-                            }
-                        },
-                        testTag = "upgrade_nitro"
-                    )
-                }
-            }
-
-            // Bottom Action (Equip or Unlock)
-            item {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    // ================= BIG GLOWING PLAY BUTTON =================
                     if (selectedCar.isUnlocked) {
-                        val isEquipped = selectedCar.id == equippedId
                         Button(
                             onClick = {
                                 storage.equippedCarId = selectedCar.id
-                                equippedId = selectedCar.id
-                                onEquipCar(selectedCar)
+                                onStartDrift(selectedCar, selectedTrack, selectedMode)
                             },
-                            enabled = !isEquipped,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isEquipped) Color(0xFF2E7D32) else NeonOrange,
-                                disabledContainerColor = Color(0xFF1B5E20)
+                                containerColor = NeonOrange
                             ),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
-                                .testTag("garage_equip_button")
+                                .border(2.dp, Color(0xFFFFA000), RoundedCornerShape(16.dp))
+                                .testTag("start_drift_button")
                         ) {
-                            Text(
-                                text = if (isEquipped) "CURRENTLY EQUIPPED" else "EQUIP CAR",
-                                color = if (isEquipped) Color.White else Color.Black,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Black
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "START DRIFT",
+                                    color = Color.Black,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 1.sp
+                                )
+                            }
                         }
                     } else {
                         val canUnlock = playerCoins >= selectedCar.basePrice
@@ -692,7 +592,6 @@ fun GarageScreen(
                                     storage.equippedCarId = selectedCar.id
                                     equippedId = selectedCar.id
                                     playerCoins = storage.coins
-                                    onEquipCar(selectedCar.copy(isUnlocked = true))
                                 }
                             },
                             enabled = canUnlock,
@@ -707,11 +606,188 @@ fun GarageScreen(
                                 Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "UNLOCK FOR ${selectedCar.basePrice} COINS",
+                                    text = "UNLOCK CAR FOR ${selectedCar.basePrice} COINS",
                                     color = Color.Black,
-                                    fontSize = 15.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.Black
                                 )
+                            }
+                        }
+                    }
+                }
+
+                // ================= RIGHT COLUMN: COLOR & TRACK CUSTOMIZER =================
+                Column(
+                    modifier = Modifier
+                        .width(225.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RacingSurface)
+                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(14.dp))
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = "CUSTOM FINISH & CIRCUIT",
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 1. Paint Finishes
+                        item {
+                            Text("BODY PAINT", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(paintColors) { (colorHex, name) ->
+                                    val isSelected = selectedCar.bodyColor == colorHex
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(colorHex))
+                                            .border(1.5.dp, if (isSelected) NeonOrange else Color(0x33FFFFFF), CircleShape)
+                                            .clickable {
+                                                storage.setCarCustomPaint(selectedCar.id, colorHex)
+                                                playerCoins = storage.coins
+                                            }
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = if (colorHex == 0xFFECEFF1 || colorHex == 0xFFFFD600) Color.Black else Color.White, modifier = Modifier.size(14.dp).align(Alignment.Center))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Underglow
+                        item {
+                            Text("NEON UNDERGLOW", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(underglowColors) { (colorHex, name) ->
+                                    val isSelected = selectedCar.underglowColor == colorHex
+                                    Box(
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(colorHex))
+                                            .border(1.5.dp, if (isSelected) Color.White else Color(0x33FFFFFF), CircleShape)
+                                            .clickable {
+                                                storage.setCarUnderglowColor(selectedCar.id, colorHex)
+                                                playerCoins = storage.coins
+                                            }
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp).align(Alignment.Center))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Smoke Color
+                        item {
+                            Text("TIRE SMOKE", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(smokeColors) { (colorHex, name) ->
+                                    val isSelected = selectedCar.smokeColor == colorHex
+                                    Box(
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(colorHex))
+                                            .border(1.5.dp, if (isSelected) Color.White else Color(0x33FFFFFF), CircleShape)
+                                            .clickable {
+                                                storage.setCarSmokeColor(selectedCar.id, colorHex)
+                                                playerCoins = storage.coins
+                                            }
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp).align(Alignment.Center))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 4. Track Selection list
+                        item {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text("CIRCUITS", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        items(Track.ALL_TRACKS) { trk ->
+                            val isTrkSelected = trk.id == selectedTrack.id
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isTrkSelected) Color(0xFF1F2533) else RacingCard
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isTrkSelected) NeonCyan else Color(0x1AFFFFFF)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        storage.selectedTrackId = trk.id
+                                        onTrackChange(trk)
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(trk.name, color = if (isTrkSelected) NeonCyan else TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                        Text(trk.difficulty, color = Color(trk.curbColor), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    if (isTrkSelected) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        // 5. Game Mode Selection
+                        item {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text("GAME MODE", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        items(GameMode.values()) { gm ->
+                            val isModeSelected = gm == selectedMode
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isModeSelected) Color(0xFF261D15) else RacingCard
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isModeSelected) NeonOrange else Color(0x1AFFFFFF)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onModeChange(gm) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(gm.title, color = if (isModeSelected) NeonOrange else TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                        Text(gm.subtitle, color = TextMuted, fontSize = 9.sp)
+                                    }
+                                    if (isModeSelected) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = NeonOrange, modifier = Modifier.size(14.dp))
+                                    }
+                                }
                             }
                         }
                     }
@@ -722,92 +798,174 @@ fun GarageScreen(
 }
 
 @Composable
-private fun StatBar(name: String, value: Float, maxValue: Float, color: Color) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = name, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            Text(text = "${(value).toInt()}", color = color, fontSize = 11.sp, fontWeight = FontWeight.Black)
-        }
-        Spacer(modifier = Modifier.height(3.dp))
-        LinearProgressIndicator(
-            progress = { (value / maxValue).coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp)),
-            color = color,
-            trackColor = Color(0x22FFFFFF)
-        )
-    }
-}
-
-@Composable
-private fun UpgradeRow(
+private fun LandscapeUpgradeItem(
     title: String,
-    description: String,
-    currentLevel: Int,
+    level: Int,
     cost: Int,
     canAfford: Boolean,
-    isMax: Boolean,
-    onUpgrade: () -> Unit,
-    testTag: String
+    onUpgrade: () -> Unit
 ) {
+    val isMax = level >= 3
     Card(
         colors = CardDefaults.cardColors(containerColor = RacingCard),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x1AFFFFFF)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Black)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        color = NeonCyan.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = if (isMax) "MAX" else "LV $currentLevel/3",
-                            color = NeonCyan,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(text = description, color = TextMuted, fontSize = 10.sp)
+                Text(title, color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                Text(if (isMax) "MAX" else "LV $level/3", color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
-
-            Spacer(modifier = Modifier.width(8.dp))
 
             Button(
                 onClick = onUpgrade,
                 enabled = !isMax && canAfford,
                 colors = ButtonDefaults.buttonColors(containerColor = NeonOrange),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .height(38.dp)
-                    .testTag(testTag)
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                modifier = Modifier.height(28.dp)
             ) {
-                if (isMax) {
-                    Text("MAXED", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("$cost", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                    }
-                }
+                Text(if (isMax) "MAX" else "$cost", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Black)
             }
         }
     }
+}
+
+@Composable
+private fun SpecPill(label: String, value: String, color: Color) {
+    Surface(
+        color = RacingCard,
+        shape = RoundedCornerShape(6.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f))
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Text(label, color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(value, color = color, fontSize = 10.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+private fun DrawScope.draw3DShowcaseCar(
+    cx: Float,
+    cy: Float,
+    rotAngleDeg: Float,
+    car: Car
+) {
+    val rad = rotAngleDeg * (PI.toFloat() / 180f)
+    val cosR = cos(rad)
+    val sinR = sin(rad)
+
+    val scaleX = 1.0f
+    val scaleY = 0.52f // isometric perspective tilt
+
+    fun isoProject(x: Float, y: Float, z: Float): Offset {
+        val rx = x * cosR - y * sinR
+        val ry = x * sinR + y * cosR
+        val screenX = cx + rx * scaleX
+        val screenY = cy + ry * scaleY - z
+        return Offset(screenX, screenY)
+    }
+
+    val length = 75f
+    val width = 38f
+    val bodyH = 14f
+    val roofH = 26f
+
+    val bodyColor = Color(car.bodyColor)
+    val accentColor = Color(car.accentColor)
+
+    // Shadow & Underglow
+    drawOval(
+        color = Color(car.underglowColor).copy(alpha = 0.6f),
+        topLeft = Offset(cx - 75f, cy - 25f),
+        size = Size(150f, 50f)
+    )
+
+    // 3D Wheels
+    val wheelOffsets = listOf(
+        Pair(length * 0.35f, -width * 0.52f),
+        Pair(length * 0.35f, width * 0.52f),
+        Pair(-length * 0.35f, -width * 0.52f),
+        Pair(-length * 0.35f, width * 0.52f)
+    )
+    for ((wx, wy) in wheelOffsets) {
+        val wp = isoProject(wx, wy, 0f)
+        drawCircle(color = Color(0xFF11141A), radius = 7f, center = wp)
+        drawCircle(color = Color(0xFFCBD5E1), radius = 2.5f, center = wp)
+    }
+
+    // Body bottom corners
+    val bFL = isoProject(length * 0.5f, -width * 0.5f, 4f)
+    val bFR = isoProject(length * 0.5f, width * 0.5f, 4f)
+    val bRR = isoProject(-length * 0.5f, width * 0.5f, 4f)
+    val bRL = isoProject(-length * 0.5f, -width * 0.5f, 4f)
+
+    // Body waist corners
+    val mFL = isoProject(length * 0.48f, -width * 0.48f, bodyH)
+    val mFR = isoProject(length * 0.48f, width * 0.48f, bodyH)
+    val mRR = isoProject(-length * 0.48f, width * 0.48f, bodyH)
+    val mRL = isoProject(-length * 0.48f, -width * 0.48f, bodyH)
+
+    // Cabin roof corners
+    val cFL = isoProject(length * 0.12f, -width * 0.38f, roofH)
+    val cFR = isoProject(length * 0.12f, width * 0.38f, roofH)
+    val cRR = isoProject(-length * 0.26f, width * 0.38f, roofH)
+    val cRL = isoProject(-length * 0.26f, -width * 0.38f, roofH)
+
+    // Draw Body Lower Faces
+    val path = Path()
+
+    // Front Face
+    path.reset()
+    path.moveTo(bFL.x, bFL.y); path.lineTo(bFR.x, bFR.y); path.lineTo(mFR.x, mFR.y); path.lineTo(mFL.x, mFL.y); path.close()
+    drawPath(path, bodyColor)
+
+    // Side Faces
+    path.reset()
+    path.moveTo(bFR.x, bFR.y); path.lineTo(bRR.x, bRR.y); path.lineTo(mRR.x, mRR.y); path.lineTo(mFR.x, mFR.y); path.close()
+    drawPath(path, bodyColor.copy(alpha = 0.85f))
+
+    path.reset()
+    path.moveTo(bFL.x, bFL.y); path.lineTo(bRL.x, bRL.y); path.lineTo(mRL.x, mRL.y); path.lineTo(mFL.x, mFL.y); path.close()
+    drawPath(path, bodyColor.copy(alpha = 0.85f))
+
+    // Rear Face
+    path.reset()
+    path.moveTo(bRL.x, bRL.y); path.lineTo(bRR.x, bRR.y); path.lineTo(mRR.x, mRR.y); path.lineTo(mRL.x, mRL.y); path.close()
+    drawPath(path, bodyColor.copy(alpha = 0.75f))
+
+    // Hood Deck
+    path.reset()
+    path.moveTo(mFL.x, mFL.y); path.lineTo(mFR.x, mFR.y); path.lineTo(cFR.x, cFR.y); path.lineTo(cFL.x, cFL.y); path.close()
+    drawPath(path, bodyColor)
+
+    // Windshield
+    path.reset()
+    path.moveTo(mFL.x * 0.7f + cFL.x * 0.3f, mFL.y * 0.7f + cFL.y * 0.3f)
+    path.lineTo(mFR.x * 0.7f + cFR.x * 0.3f, mFR.y * 0.7f + cFR.y * 0.3f)
+    path.lineTo(cFR.x, cFR.y)
+    path.lineTo(cFL.x, cFL.y)
+    path.close()
+    drawPath(path, Color(0xFF1E293B))
+
+    // Roof
+    path.reset()
+    path.moveTo(cFL.x, cFL.y); path.lineTo(cFR.x, cFR.y); path.lineTo(cRR.x, cRR.y); path.lineTo(cRL.x, cRL.y); path.close()
+    drawPath(path, bodyColor)
+    // Accent Stripe
+    drawLine(accentColor, Offset((cFL.x + cFR.x) * 0.5f, (cFL.y + cFR.y) * 0.5f), Offset((cRL.x + cRR.x) * 0.5f, (cRL.y + cRR.y) * 0.5f), strokeWidth = 5f)
+
+    // Rear Spoiler Wing
+    val sL = isoProject(-length * 0.5f, -width * 0.5f, roofH + 4f)
+    val sR = isoProject(-length * 0.5f, width * 0.5f, roofH + 4f)
+    drawLine(accentColor, sL, sR, strokeWidth = 4f)
 }

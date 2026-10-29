@@ -6,7 +6,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -16,29 +15,31 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.game.model.Track
-import com.example.game.model.TrackObstacle
 import com.example.game.physics.DriftPhysicsEngine
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NeonOrange
 import com.example.ui.theme.NeonYellow
 import com.example.ui.theme.NitroBlue
-import com.example.ui.theme.NitroGlow
 import com.example.ui.theme.RacingDark
 import com.example.ui.theme.SynthwaveSkyHorizon
 import com.example.ui.theme.SynthwaveSkyMid
 import com.example.ui.theme.SynthwaveSkyTop
 import com.example.ui.theme.SynthwaveSunGlow
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 class GameCanvasRenderer {
 
     val camera3D = Game3DCamera()
     private var lastTimeNanos = 0L
+
+    // Reusable Path objects to prevent Garbage Collection pauses and eliminate lag completely
+    private val reusableRoadPath = Path()
+    private val reusableCarPath = Path()
+    private val reusableBeamPath = Path()
+    private val reusableBoxPath = Path()
 
     fun draw(
         drawScope: DrawScope,
@@ -46,7 +47,7 @@ class GameCanvasRenderer {
         textMeasurer: TextMeasurer
     ) {
         val now = System.nanoTime()
-        val dt = if (lastTimeNanos == 0L) 0.016f else ((now - lastTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
+        val dt = if (lastTimeNanos == 0L) 0.016f else ((now - lastTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.04f)
         lastTimeNanos = now
 
         with(drawScope) {
@@ -73,10 +74,10 @@ class GameCanvasRenderer {
             // 2. Draw 3D Ground Floor (Asphalt Plain)
             draw3DGroundPlane(w, h, camera3D)
 
-            // 3. Draw 3D Track Road Ribbon & Curbs
+            // 3. Draw 3D Track Road Ribbon & Curbs (with Distance Culling & zero allocations)
             draw3DTrackRoad(physics.track, camera3D)
 
-            // 4. Draw 3D Skidmarks
+            // 4. Draw 3D Skidmarks (capped to nearby recent marks)
             draw3DSkidmarks(physics, camera3D)
 
             // 5. Draw 3D Apex Beacons & Clipping Targets
@@ -118,15 +119,15 @@ class GameCanvasRenderer {
         )
 
         // Synthwave Glowing Sun on Horizon
-        val sunRadius = 75f
-        val sunCenter = Offset(w * 0.5f, horizonY - 20f)
+        val sunRadius = 65f
+        val sunCenter = Offset(w * 0.5f, horizonY - 15f)
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xFFFFF176), SynthwaveSunGlow, Color(0x00FF007F)),
                 center = sunCenter,
-                radius = sunRadius * 1.5f
+                radius = sunRadius * 1.4f
             ),
-            radius = sunRadius * 1.5f,
+            radius = sunRadius * 1.4f,
             center = sunCenter
         )
         drawCircle(
@@ -135,14 +136,14 @@ class GameCanvasRenderer {
             center = sunCenter
         )
         // Horizontal stripes through sun
-        for (i in 1..6) {
-            val yOffset = sunCenter.y + (i * 10f) - 10f
+        for (i in 1..5) {
+            val yOffset = sunCenter.y + (i * 9f) - 8f
             if (yOffset < horizonY) {
                 drawLine(
                     color = SynthwaveSkyMid,
                     start = Offset(sunCenter.x - sunRadius, yOffset),
                     end = Offset(sunCenter.x + sunRadius, yOffset),
-                    strokeWidth = 3f
+                    strokeWidth = 2.5f
                 )
             }
         }
@@ -152,44 +153,35 @@ class GameCanvasRenderer {
         val parallaxOffset = -(camAngleDeg * 4.5f) % w
 
         val buildings = listOf(
-            Triple(40f, 130f, 0xFF00F5FF),
-            Triple(90f, 180f, 0xFFFF007F),
-            Triple(140f, 95f, 0xFFFFD600),
-            Triple(185f, 160f, 0xFFA855F7),
-            Triple(240f, 110f, 0xFF00E676),
-            Triple(290f, 195f, 0xFF00F5FF),
-            Triple(350f, 140f, 0xFFFF6D00),
-            Triple(410f, 170f, 0xFFFF007F),
-            Triple(470f, 120f, 0xFF00E5FF),
-            Triple(530f, 150f, 0xFFA855F7)
+            Triple(40f, 110f, 0xFF00F5FF),
+            Triple(90f, 150f, 0xFFFF007F),
+            Triple(140f, 85f, 0xFFFFD600),
+            Triple(190f, 135f, 0xFFA855F7),
+            Triple(250f, 100f, 0xFF00E676),
+            Triple(310f, 160f, 0xFF00F5FF),
+            Triple(370f, 120f, 0xFFFF6D00),
+            Triple(430f, 145f, 0xFFFF007F),
+            Triple(490f, 105f, 0xFF00E5FF),
+            Triple(550f, 130f, 0xFFA855F7)
         )
 
         for (copy in -1..2) {
             val baseShift = parallaxOffset + (copy * 600f)
             for ((bx, bh, glowColor) in buildings) {
                 val screenBx = baseShift + bx
-                if (screenBx in -100f..w + 100f) {
+                if (screenBx in -80f..w + 80f) {
                     val topY = horizonY - bh
-                    // Building Silhouette
                     drawRect(
-                        color = Color(0xFF0F0A1A),
+                        color = Color(0xFF0C0816),
                         topLeft = Offset(screenBx, topY),
-                        size = Size(42f, bh)
+                        size = Size(36f, bh)
                     )
-                    // Neon Roof Antenna / Edge
                     drawLine(
                         color = Color(glowColor),
                         start = Offset(screenBx, topY),
-                        end = Offset(screenBx + 42f, topY),
+                        end = Offset(screenBx + 36f, topY),
                         strokeWidth = 2f
                     )
-                    // Glowing Window Dots
-                    var wy = topY + 12f
-                    while (wy < horizonY - 8f) {
-                        drawCircle(color = Color(glowColor).copy(alpha = 0.7f), radius = 1.8f, center = Offset(screenBx + 10f, wy))
-                        drawCircle(color = Color(glowColor).copy(alpha = 0.7f), radius = 1.8f, center = Offset(screenBx + 30f, wy))
-                        wy += 16f
-                    }
                 }
             }
         }
@@ -197,7 +189,6 @@ class GameCanvasRenderer {
 
     private fun DrawScope.draw3DGroundPlane(w: Float, h: Float, cam: Game3DCamera) {
         val horizonY = cam.horizonScreenY
-        // Ground dark asphalt below horizon
         drawRect(
             color = RacingDark,
             topLeft = Offset(0f, horizonY),
@@ -213,11 +204,15 @@ class GameCanvasRenderer {
         if (numSegments < 2) return
 
         val curbColors = listOf(NeonMagenta, Color.White, NeonCyan, NeonYellow)
+        val maxDistSq = 1100f * 1100f
 
-        // Draw track segments
-        val step = 1
-        for (i in 0 until numSegments - 1 step step) {
+        for (i in 0 until numSegments - 1) {
             val nextIdx = (i + 1) % numSegments
+
+            // Distance culling: skip far segments to eliminate lag
+            val dx = center[i].x - cam.posX
+            val dy = center[i].y - cam.posY
+            if (dx * dx + dy * dy > maxDistSq) continue
 
             val o1 = cam.project(outer[i].x, outer[i].y, 0f)
             val o2 = cam.project(outer[nextIdx].x, outer[nextIdx].y, 0f)
@@ -226,20 +221,20 @@ class GameCanvasRenderer {
 
             if (!o1.isVisible && !o2.isVisible && !i1.isVisible && !i2.isVisible) continue
 
-            // 3D Road Quad
-            val roadPath = Path().apply {
-                moveTo(o1.x, o1.y)
-                lineTo(o2.x, o2.y)
-                lineTo(i2.x, i2.y)
-                lineTo(i1.x, i1.y)
-                close()
-            }
+            // 3D Road Quad using reusable Path (ZERO heap allocation!)
+            reusableRoadPath.reset()
+            reusableRoadPath.moveTo(o1.x, o1.y)
+            reusableRoadPath.lineTo(o2.x, o2.y)
+            reusableRoadPath.lineTo(i2.x, i2.y)
+            reusableRoadPath.lineTo(i1.x, i1.y)
+            reusableRoadPath.close()
+
             drawPath(
-                path = roadPath,
+                path = reusableRoadPath,
                 color = Color(track.roadColor)
             )
 
-            // Center Dash Line in 3D
+            // Center Dash Line
             val c1 = cam.project(center[i].x, center[i].y, 0.5f)
             val c2 = cam.project(center[nextIdx].x, center[nextIdx].y, 0.5f)
             if (c1.isVisible && c2.isVisible) {
@@ -247,15 +242,14 @@ class GameCanvasRenderer {
                     color = Color(0x66FFFFFF),
                     start = Offset(c1.x, c1.y),
                     end = Offset(c2.x, c2.y),
-                    strokeWidth = (240f / ((c1.depth + c2.depth) * 0.5f)).coerceIn(1.5f, 8f)
+                    strokeWidth = (220f / ((c1.depth + c2.depth) * 0.5f)).coerceIn(1.5f, 6f)
                 )
             }
 
-            // Outer 3D Glowing Curb & Barrier
+            // Outer 3D Curb
             val curbColor = curbColors[(i / 2) % curbColors.size]
             if (o1.isVisible && o2.isVisible) {
-                // Curb stripe
-                val curbWidth = (380f / o1.depth).coerceIn(2.5f, 14f)
+                val curbWidth = (340f / o1.depth).coerceIn(2.5f, 12f)
                 drawLine(
                     color = curbColor,
                     start = Offset(o1.x, o1.y),
@@ -263,33 +257,11 @@ class GameCanvasRenderer {
                     strokeWidth = curbWidth,
                     cap = StrokeCap.Round
                 )
-
-                // 3D Barrier Posts with glowing neon rail
-                val postHeight = 18f
-                val p1Top = cam.project(outer[i].x, outer[i].y, postHeight)
-                val p2Top = cam.project(outer[nextIdx].x, outer[nextIdx].y, postHeight)
-
-                if (p1Top.isVisible && p2Top.isVisible) {
-                    // Vertical post
-                    drawLine(
-                        color = Color(0xFF64748B),
-                        start = Offset(o1.x, o1.y),
-                        end = Offset(p1Top.x, p1Top.y),
-                        strokeWidth = (140f / o1.depth).coerceIn(1.5f, 5f)
-                    )
-                    // Neon glowing cable
-                    drawLine(
-                        color = Color(track.barrierGlowColor),
-                        start = Offset(p1Top.x, p1Top.y),
-                        end = Offset(p2Top.x, p2Top.y),
-                        strokeWidth = (220f / o1.depth).coerceIn(2f, 8f)
-                    )
-                }
             }
 
-            // Inner 3D Glowing Curb
+            // Inner 3D Curb
             if (i1.isVisible && i2.isVisible) {
-                val curbWidth = (380f / i1.depth).coerceIn(2.5f, 14f)
+                val curbWidth = (340f / i1.depth).coerceIn(2.5f, 12f)
                 drawLine(
                     color = Color(track.curbColor),
                     start = Offset(i1.x, i1.y),
@@ -302,11 +274,15 @@ class GameCanvasRenderer {
     }
 
     private fun DrawScope.draw3DSkidmarks(physics: DriftPhysicsEngine, cam: Game3DCamera) {
-        for (seg in physics.skidSegments) {
+        val total = physics.skidSegments.size
+        val startIdx = if (total > 65) total - 65 else 0
+
+        for (idx in startIdx until total) {
+            val seg = physics.skidSegments[idx]
             val p1 = cam.project(seg.x1, seg.y1, 0.4f)
             val p2 = cam.project(seg.x2, seg.y2, 0.4f)
             if (p1.isVisible && p2.isVisible) {
-                val strokeW = (360f / p1.depth).coerceIn(2f, 10f)
+                val strokeW = (320f / p1.depth).coerceIn(2f, 8f)
                 drawLine(
                     color = Color(0xFF0A0D14).copy(alpha = seg.alpha),
                     start = Offset(p1.x, p1.y),
@@ -323,12 +299,11 @@ class GameCanvasRenderer {
 
         for (clip in track.clippingPoints) {
             val groundPt = cam.project(clip.x, clip.y, 0f)
-            val topPt = cam.project(clip.x, clip.y, 75f) // high holographic beacon into sky
+            val topPt = cam.project(clip.x, clip.y, 65f)
 
             if (groundPt.isVisible) {
-                val baseRadius = (clip.radius * cam.focalLength / groundPt.depth).coerceIn(12f, 160f)
+                val baseRadius = (clip.radius * cam.focalLength / groundPt.depth).coerceIn(12f, 140f)
 
-                // Glowing target ring on road
                 drawCircle(
                     color = NeonCyan.copy(alpha = 0.2f + pulse * 0.25f),
                     radius = baseRadius,
@@ -339,10 +314,9 @@ class GameCanvasRenderer {
                     color = NeonCyan,
                     radius = baseRadius,
                     center = Offset(groundPt.x, groundPt.y),
-                    style = Stroke(width = (180f / groundPt.depth).coerceIn(2f, 6f))
+                    style = Stroke(width = (160f / groundPt.depth).coerceIn(2f, 5f))
                 )
 
-                // Vertical Holographic Light Beam
                 if (topPt.isVisible) {
                     drawLine(
                         brush = Brush.verticalGradient(
@@ -352,7 +326,7 @@ class GameCanvasRenderer {
                         ),
                         start = Offset(topPt.x, topPt.y),
                         end = Offset(groundPt.x, groundPt.y),
-                        strokeWidth = (260f / groundPt.depth).coerceIn(3f, 12f)
+                        strokeWidth = (220f / groundPt.depth).coerceIn(3f, 10f)
                     )
                 }
             }
@@ -361,7 +335,7 @@ class GameCanvasRenderer {
 
     private fun DrawScope.draw3DObstacles(track: Track, cam: Game3DCamera) {
         for (obs in track.obstacles) {
-            val h = 32f // height
+            val h = 28f
             val cosR = cos(obs.rotationDeg * (PI.toFloat() / 180f))
             val sinR = sin(obs.rotationDeg * (PI.toFloat() / 180f))
             val hw = obs.width * 0.5f
@@ -375,41 +349,45 @@ class GameCanvasRenderer {
 
             val b1 = getCorner(-hw, -hh, 0f)
             val b2 = getCorner(hw, -hh, 0f)
-            val b3 = getCorner(hw, hh, 0f)
-            val b4 = getCorner(-hw, hh, 0f)
-
             val t1 = getCorner(-hw, -hh, h)
             val t2 = getCorner(hw, -hh, h)
             val t3 = getCorner(hw, hh, h)
             val t4 = getCorner(-hw, hh, h)
 
-            if (b1.isVisible || t3.isVisible) {
-                // Top face
-                if (t1.isVisible && t2.isVisible && t3.isVisible && t4.isVisible) {
-                    val topPath = Path().apply {
-                        moveTo(t1.x, t1.y); lineTo(t2.x, t2.y); lineTo(t3.x, t3.y); lineTo(t4.x, t4.y); close()
-                    }
-                    drawPath(path = topPath, color = Color(0xFF475569))
-                    drawPath(path = topPath, color = NeonOrange, style = Stroke(width = 2f))
-                }
+            if (t1.isVisible && t2.isVisible && t3.isVisible && t4.isVisible) {
+                reusableBoxPath.reset()
+                reusableBoxPath.moveTo(t1.x, t1.y)
+                reusableBoxPath.lineTo(t2.x, t2.y)
+                reusableBoxPath.lineTo(t3.x, t3.y)
+                reusableBoxPath.lineTo(t4.x, t4.y)
+                reusableBoxPath.close()
 
-                // Front/Side face
-                if (b1.isVisible && b2.isVisible && t2.isVisible && t1.isVisible) {
-                    val sidePath = Path().apply {
-                        moveTo(b1.x, b1.y); lineTo(b2.x, b2.y); lineTo(t2.x, t2.y); lineTo(t1.x, t1.y); close()
-                    }
-                    drawPath(path = sidePath, color = Color(0xFF334155))
-                    drawPath(path = sidePath, color = NeonOrange, style = Stroke(width = 2f))
-                }
+                drawPath(path = reusableBoxPath, color = Color(0xFF475569))
+                drawPath(path = reusableBoxPath, color = NeonOrange, style = Stroke(width = 2f))
+            }
+
+            if (b1.isVisible && b2.isVisible && t2.isVisible && t1.isVisible) {
+                reusableBoxPath.reset()
+                reusableBoxPath.moveTo(b1.x, b1.y)
+                reusableBoxPath.lineTo(b2.x, b2.y)
+                reusableBoxPath.lineTo(t2.x, t2.y)
+                reusableBoxPath.lineTo(t1.x, t1.y)
+                reusableBoxPath.close()
+
+                drawPath(path = reusableBoxPath, color = Color(0xFF334155))
             }
         }
     }
 
     private fun DrawScope.draw3DSmokeParticles(physics: DriftPhysicsEngine, cam: Game3DCamera) {
-        for (p in physics.smokeParticles) {
+        val total = physics.smokeParticles.size
+        val start = if (total > 50) total - 50 else 0
+
+        for (i in start until total) {
+            val p = physics.smokeParticles[i]
             val sp = cam.project(p.x, p.y, p.z)
             if (sp.isVisible) {
-                val screenRadius = (p.radius * cam.focalLength / sp.depth).coerceIn(4f, 90f)
+                val screenRadius = (p.radius * cam.focalLength / sp.depth).coerceIn(4f, 75f)
                 drawCircle(
                     color = Color(p.color).copy(alpha = (p.alpha * 0.65f).coerceIn(0f, 1f)),
                     radius = screenRadius,
@@ -429,9 +407,8 @@ class GameCanvasRenderer {
 
         val length = physics.carLength
         val width = physics.carWidth
-        val height = 16f
+        val height = 15f
 
-        // Local chassis transformation matrix with Heading, Body Roll & Pitch
         val cosH = cos(heading)
         val sinH = sin(heading)
         val cosRoll = cos(bodyRoll)
@@ -439,59 +416,52 @@ class GameCanvasRenderer {
         val cosPitch = cos(bodyPitch)
         val sinPitch = sin(bodyPitch)
 
-        fun carToWorld3D(localForward: Float, localRight: Float, localUp: Float): Point3D {
-            // Apply roll & pitch
+        fun projectCarPoint(localFwd: Float, localRight: Float, localUp: Float): ScreenPoint {
             val rolledRight = localRight * cosRoll - localUp * sinRoll
             val rolledUp = localRight * sinRoll + localUp * cosRoll
-
-            val pitchedForward = localForward * cosPitch - rolledUp * sinPitch
-            val pitchedUp = localForward * sinPitch + rolledUp * cosPitch
-
-            // Apply heading
+            val pitchedForward = localFwd * cosPitch - rolledUp * sinPitch
+            val pitchedUp = localFwd * sinPitch + rolledUp * cosPitch
             val wx = cx + (pitchedForward * cosH - rolledRight * sinH)
             val wy = cy + (pitchedForward * sinH + rolledRight * cosH)
             val wz = (pitchedUp).coerceAtLeast(0.5f)
-
-            return Point3D(wx, wy, wz)
-        }
-
-        fun projectCarPoint(localFwd: Float, localRight: Float, localUp: Float): ScreenPoint {
-            val pt = carToWorld3D(localFwd, localRight, localUp)
-            return cam.project(pt.x, pt.y, pt.z)
+            return cam.project(wx, wy, wz)
         }
 
         // 1. 3D Underglow on road surface
-        val ug1 = cam.project(cx - cosH * length * 0.6f - sinH * width * 0.7f, cy - sinH * length * 0.6f + cosH * width * 0.7f, 0.2f)
-        val ug2 = cam.project(cx + cosH * length * 0.6f - sinH * width * 0.7f, cy + sinH * length * 0.6f + cosH * width * 0.7f, 0.2f)
-        val ug3 = cam.project(cx + cosH * length * 0.6f + sinH * width * 0.7f, cy + sinH * length * 0.6f - cosH * width * 0.7f, 0.2f)
-        val ug4 = cam.project(cx - cosH * length * 0.6f + sinH * width * 0.7f, cy - sinH * length * 0.6f - cosH * width * 0.7f, 0.2f)
+        val ug1 = cam.project(cx - cosH * length * 0.55f - sinH * width * 0.65f, cy - sinH * length * 0.55f + cosH * width * 0.65f, 0.2f)
+        val ug2 = cam.project(cx + cosH * length * 0.55f - sinH * width * 0.65f, cy + sinH * length * 0.55f + cosH * width * 0.65f, 0.2f)
+        val ug3 = cam.project(cx + cosH * length * 0.55f + sinH * width * 0.65f, cy + sinH * length * 0.55f - cosH * width * 0.65f, 0.2f)
+        val ug4 = cam.project(cx - cosH * length * 0.55f + sinH * width * 0.65f, cy - sinH * length * 0.55f - cosH * width * 0.65f, 0.2f)
 
         if (ug1.isVisible && ug2.isVisible && ug3.isVisible && ug4.isVisible) {
-            val ugPath = Path().apply {
-                moveTo(ug1.x, ug1.y); lineTo(ug2.x, ug2.y); lineTo(ug3.x, ug3.y); lineTo(ug4.x, ug4.y); close()
-            }
-            drawPath(path = ugPath, color = Color(car.underglowColor).copy(alpha = 0.6f))
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(ug1.x, ug1.y)
+            reusableCarPath.lineTo(ug2.x, ug2.y)
+            reusableCarPath.lineTo(ug3.x, ug3.y)
+            reusableCarPath.lineTo(ug4.x, ug4.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = Color(car.underglowColor).copy(alpha = 0.6f))
         }
 
         // 2. Headlight Beams in 3D
         val hlLeft = projectCarPoint(length * 0.5f, -width * 0.35f, 4f)
         val hlRight = projectCarPoint(length * 0.5f, width * 0.35f, 4f)
-        val hlBeamFwd = length * 0.5f + 200f
-        val hlLeftEnd = projectCarPoint(hlBeamFwd, -width * 1.6f, 0.5f)
-        val hlRightEnd = projectCarPoint(hlBeamFwd, width * 1.6f, 0.5f)
+        val hlBeamFwd = length * 0.5f + 160f
+        val hlLeftEnd = projectCarPoint(hlBeamFwd, -width * 1.5f, 0.5f)
+        val hlRightEnd = projectCarPoint(hlBeamFwd, width * 1.5f, 0.5f)
 
         if (hlLeft.isVisible && hlLeftEnd.isVisible && hlRightEnd.isVisible && hlRight.isVisible) {
-            val beamPath = Path().apply {
-                moveTo(hlLeft.x, hlLeft.y)
-                lineTo(hlLeftEnd.x, hlLeftEnd.y)
-                lineTo(hlRightEnd.x, hlRightEnd.y)
-                lineTo(hlRight.x, hlRight.y)
-                close()
-            }
+            reusableBeamPath.reset()
+            reusableBeamPath.moveTo(hlLeft.x, hlLeft.y)
+            reusableBeamPath.lineTo(hlLeftEnd.x, hlLeftEnd.y)
+            reusableBeamPath.lineTo(hlRightEnd.x, hlRightEnd.y)
+            reusableBeamPath.lineTo(hlRight.x, hlRight.y)
+            reusableBeamPath.close()
+
             drawPath(
-                path = beamPath,
+                path = reusableBeamPath,
                 brush = Brush.verticalGradient(
-                    colors = listOf(Color(0x5500F5FF), Color(0x1000F5FF), Color.Transparent),
+                    colors = listOf(Color(0x4500F5FF), Color(0x1000F5FF), Color.Transparent),
                     startY = minOf(hlLeft.y, hlRight.y),
                     endY = maxOf(hlLeftEnd.y, hlRightEnd.y)
                 )
@@ -499,8 +469,8 @@ class GameCanvasRenderer {
         }
 
         // 3. 3D Wheels
-        val wheelRadius = 6.5f
-        val wheelWidth = 3.8f
+        val wheelRadius = 6.2f
+        val wheelWidth = 3.6f
         val rearFwd = -length * 0.35f
         val frontFwd = length * 0.35f
         val sideOut = width * 0.52f
@@ -510,155 +480,144 @@ class GameCanvasRenderer {
         draw3DWheel(frontFwd, -sideOut, physics.steerAngle, wheelRadius, wheelWidth, ::projectCarPoint)
         draw3DWheel(frontFwd, sideOut, physics.steerAngle, wheelRadius, wheelWidth, ::projectCarPoint)
 
-        // 4. 3D Lower Chassis (Front bumper, Rear bumper, Side skirts)
-        val fL_bot = projectCarPoint(length * 0.52f, -width * 0.48f, 3f)
-        val fR_bot = projectCarPoint(length * 0.52f, width * 0.48f, 3f)
-        val rR_bot = projectCarPoint(-length * 0.5f, width * 0.48f, 3.5f)
-        val rL_bot = projectCarPoint(-length * 0.5f, -width * 0.48f, 3.5f)
+        // 4. 3D Lower Chassis Body Points
+        val fL_bot = projectCarPoint(length * 0.5f, -width * 0.46f, 3f)
+        val fR_bot = projectCarPoint(length * 0.5f, width * 0.46f, 3f)
+        val rR_bot = projectCarPoint(-length * 0.48f, width * 0.46f, 3.5f)
+        val rL_bot = projectCarPoint(-length * 0.48f, -width * 0.46f, 3.5f)
 
-        val fL_mid = projectCarPoint(length * 0.5f, -width * 0.48f, 9f)
-        val fR_mid = projectCarPoint(length * 0.5f, width * 0.48f, 9f)
-        val rR_mid = projectCarPoint(-length * 0.48f, width * 0.48f, 9.5f)
-        val rL_mid = projectCarPoint(-length * 0.48f, -width * 0.48f, 9.5f)
+        val fL_mid = projectCarPoint(length * 0.48f, -width * 0.46f, 8.5f)
+        val fR_mid = projectCarPoint(length * 0.48f, width * 0.46f, 8.5f)
+        val rR_mid = projectCarPoint(-length * 0.46f, width * 0.46f, 9f)
+        val rL_mid = projectCarPoint(-length * 0.46f, -width * 0.46f, 9f)
 
         // Cabin Roof & Windshield
-        val cabFL = projectCarPoint(length * 0.12f, -width * 0.38f, height)
-        val cabFR = projectCarPoint(length * 0.12f, width * 0.38f, height)
-        val cabRR = projectCarPoint(-length * 0.28f, width * 0.38f, height)
-        val cabRL = projectCarPoint(-length * 0.28f, -width * 0.38f, height)
-
-        val hoodMid = projectCarPoint(length * 0.45f, 0f, 9f)
+        val cabFL = projectCarPoint(length * 0.12f, -width * 0.36f, height)
+        val cabFR = projectCarPoint(length * 0.12f, width * 0.36f, height)
+        val cabRR = projectCarPoint(-length * 0.26f, width * 0.36f, height)
+        val cabRL = projectCarPoint(-length * 0.26f, -width * 0.36f, height)
 
         val bodyColor = Color(car.bodyColor)
         val accentColor = Color(car.accentColor)
 
         // Rear Bumper Face
         if (rL_bot.isVisible && rR_bot.isVisible && rR_mid.isVisible && rL_mid.isVisible) {
-            val rearFace = Path().apply {
-                moveTo(rL_bot.x, rL_bot.y); lineTo(rR_bot.x, rR_bot.y); lineTo(rR_mid.x, rR_mid.y); lineTo(rL_mid.x, rL_mid.y); close()
-            }
-            drawPath(path = rearFace, color = bodyColor.copy(alpha = 0.9f))
-            // Crimson Taillight bar
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(rL_bot.x, rL_bot.y)
+            reusableCarPath.lineTo(rR_bot.x, rR_bot.y)
+            reusableCarPath.lineTo(rR_mid.x, rR_mid.y)
+            reusableCarPath.lineTo(rL_mid.x, rL_mid.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = bodyColor.copy(alpha = 0.9f))
+
             drawLine(
                 color = Color(0xFFFF1744),
                 start = Offset((rL_mid.x * 0.8f + rR_mid.x * 0.2f), (rL_mid.y * 0.8f + rR_mid.y * 0.2f)),
                 end = Offset((rL_mid.x * 0.2f + rR_mid.x * 0.8f), (rL_mid.y * 0.2f + rR_mid.y * 0.8f)),
-                strokeWidth = 4f
+                strokeWidth = 3.5f
             )
         }
 
         // Left Body Side Face
         if (fL_bot.isVisible && rL_bot.isVisible && rL_mid.isVisible && fL_mid.isVisible) {
-            val leftFace = Path().apply {
-                moveTo(fL_bot.x, fL_bot.y); lineTo(rL_bot.x, rL_bot.y); lineTo(rL_mid.x, rL_mid.y); lineTo(fL_mid.x, fL_mid.y); close()
-            }
-            drawPath(path = leftFace, color = bodyColor)
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(fL_bot.x, fL_bot.y)
+            reusableCarPath.lineTo(rL_bot.x, rL_bot.y)
+            reusableCarPath.lineTo(rL_mid.x, rL_mid.y)
+            reusableCarPath.lineTo(fL_mid.x, fL_mid.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = bodyColor)
         }
 
         // Right Body Side Face
         if (fR_bot.isVisible && rR_bot.isVisible && rR_mid.isVisible && fR_mid.isVisible) {
-            val rightFace = Path().apply {
-                moveTo(fR_bot.x, fR_bot.y); lineTo(rR_bot.x, rR_bot.y); lineTo(rR_mid.x, rR_mid.y); lineTo(fR_mid.x, fR_mid.y); close()
-            }
-            drawPath(path = rightFace, color = bodyColor)
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(fR_bot.x, fR_bot.y)
+            reusableCarPath.lineTo(rR_bot.x, rR_bot.y)
+            reusableCarPath.lineTo(rR_mid.x, rR_mid.y)
+            reusableCarPath.lineTo(fR_mid.x, fR_mid.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = bodyColor)
         }
 
-        // Hood & Trunk Top Deck
+        // Hood Top Deck
         if (fL_mid.isVisible && fR_mid.isVisible && cabFR.isVisible && cabFL.isVisible) {
-            val hoodFace = Path().apply {
-                moveTo(fL_mid.x, fL_mid.y); lineTo(fR_mid.x, fR_mid.y); lineTo(cabFR.x, cabFR.y); lineTo(cabFL.x, cabFL.y); close()
-            }
-            drawPath(path = hoodFace, color = bodyColor)
-            // Racing Stripe
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(fL_mid.x, fL_mid.y)
+            reusableCarPath.lineTo(fR_mid.x, fR_mid.y)
+            reusableCarPath.lineTo(cabFR.x, cabFR.y)
+            reusableCarPath.lineTo(cabFL.x, cabFL.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = bodyColor)
+
             val hoodCenterStart = Offset((fL_mid.x + fR_mid.x) * 0.5f, (fL_mid.y + fR_mid.y) * 0.5f)
             val hoodCenterEnd = Offset((cabFL.x + cabFR.x) * 0.5f, (cabFL.y + cabFR.y) * 0.5f)
-            drawLine(color = accentColor, start = hoodCenterStart, end = hoodCenterEnd, strokeWidth = 8f)
+            drawLine(color = accentColor, start = hoodCenterStart, end = hoodCenterEnd, strokeWidth = 7f)
         }
 
         // Rear Trunk Deck
         if (cabRL.isVisible && cabRR.isVisible && rR_mid.isVisible && rL_mid.isVisible) {
-            val trunkFace = Path().apply {
-                moveTo(cabRL.x, cabRL.y); lineTo(cabRR.x, cabRR.y); lineTo(rR_mid.x, rR_mid.y); lineTo(rL_mid.x, rL_mid.y); close()
-            }
-            drawPath(path = trunkFace, color = bodyColor)
-        }
-
-        // Front Windshield
-        if (cabFL.isVisible && cabFR.isVisible) {
-            val wsBottomL = projectCarPoint(length * 0.22f, -width * 0.42f, 10f)
-            val wsBottomR = projectCarPoint(length * 0.22f, width * 0.42f, 10f)
-            if (wsBottomL.isVisible && wsBottomR.isVisible) {
-                val wsPath = Path().apply {
-                    moveTo(wsBottomL.x, wsBottomL.y); lineTo(wsBottomR.x, wsBottomR.y); lineTo(cabFR.x, cabFR.y); lineTo(cabFL.x, cabFL.y); close()
-                }
-                drawPath(path = wsPath, color = Color(0xFF1E293B))
-                drawPath(path = wsPath, color = NeonCyan.copy(alpha = 0.5f), style = Stroke(width = 1.5f))
-            }
-        }
-
-        // Rear Window
-        if (cabRL.isVisible && cabRR.isVisible) {
-            val rwBottomL = projectCarPoint(-length * 0.38f, -width * 0.42f, 10f)
-            val rwBottomR = projectCarPoint(-length * 0.38f, width * 0.42f, 10f)
-            if (rwBottomL.isVisible && rwBottomR.isVisible) {
-                val rwPath = Path().apply {
-                    moveTo(rwBottomL.x, rwBottomL.y); lineTo(rwBottomR.x, rwBottomR.y); lineTo(cabRR.x, cabRR.y); lineTo(cabRL.x, cabRL.y); close()
-                }
-                drawPath(path = rwPath, color = Color(0xFF1E293B))
-            }
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(cabRL.x, cabRL.y)
+            reusableCarPath.lineTo(cabRR.x, cabRR.y)
+            reusableCarPath.lineTo(rR_mid.x, rR_mid.y)
+            reusableCarPath.lineTo(rL_mid.x, rL_mid.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = bodyColor)
         }
 
         // Cabin Roof
         if (cabFL.isVisible && cabFR.isVisible && cabRR.isVisible && cabRL.isVisible) {
-            val roofPath = Path().apply {
-                moveTo(cabFL.x, cabFL.y); lineTo(cabFR.x, cabFR.y); lineTo(cabRR.x, cabRR.y); lineTo(cabRL.x, cabRL.y); close()
-            }
-            drawPath(path = roofPath, color = bodyColor)
-            // Accent stripe on roof
+            reusableCarPath.reset()
+            reusableCarPath.moveTo(cabFL.x, cabFL.y)
+            reusableCarPath.lineTo(cabFR.x, cabFR.y)
+            reusableCarPath.lineTo(cabRR.x, cabRR.y)
+            reusableCarPath.lineTo(cabRL.x, cabRL.y)
+            reusableCarPath.close()
+            drawPath(path = reusableCarPath, color = bodyColor)
+
             drawLine(
                 color = accentColor,
                 start = Offset((cabFL.x + cabFR.x) * 0.5f, (cabFL.y + cabFR.y) * 0.5f),
                 end = Offset((cabRL.x + cabRR.x) * 0.5f, (cabRL.y + cabRR.y) * 0.5f),
-                strokeWidth = 8f
+                strokeWidth = 7f
             )
         }
 
         // 5. 3D Elevated Rear Spoiler (Wing)
-        val wingHeight = height + 4f
-        val wingL = projectCarPoint(-length * 0.52f, -width * 0.52f, wingHeight)
-        val wingR = projectCarPoint(-length * 0.52f, width * 0.52f, wingHeight)
-        val strutL_bot = projectCarPoint(-length * 0.46f, -width * 0.25f, 10f)
-        val strutR_bot = projectCarPoint(-length * 0.46f, width * 0.25f, 10f)
-        val strutL_top = projectCarPoint(-length * 0.46f, -width * 0.25f, wingHeight)
-        val strutR_top = projectCarPoint(-length * 0.46f, width * 0.25f, wingHeight)
+        val wingHeight = height + 3.5f
+        val wingL = projectCarPoint(-length * 0.5f, -width * 0.48f, wingHeight)
+        val wingR = projectCarPoint(-length * 0.5f, width * 0.48f, wingHeight)
+        val strutL_bot = projectCarPoint(-length * 0.44f, -width * 0.24f, 9f)
+        val strutR_bot = projectCarPoint(-length * 0.44f, width * 0.24f, 9f)
+        val strutL_top = projectCarPoint(-length * 0.44f, -width * 0.24f, wingHeight)
+        val strutR_top = projectCarPoint(-length * 0.44f, width * 0.24f, wingHeight)
 
         if (wingL.isVisible && wingR.isVisible) {
-            // Struts
             if (strutL_bot.isVisible && strutL_top.isVisible) {
-                drawLine(color = Color(0xFF1E293B), start = Offset(strutL_bot.x, strutL_bot.y), end = Offset(strutL_top.x, strutL_top.y), strokeWidth = 3f)
+                drawLine(color = Color(0xFF1E293B), start = Offset(strutL_bot.x, strutL_bot.y), end = Offset(strutL_top.x, strutL_top.y), strokeWidth = 2.5f)
             }
             if (strutR_bot.isVisible && strutR_top.isVisible) {
-                drawLine(color = Color(0xFF1E293B), start = Offset(strutR_bot.x, strutR_bot.y), end = Offset(strutR_top.x, strutR_top.y), strokeWidth = 3f)
+                drawLine(color = Color(0xFF1E293B), start = Offset(strutR_bot.x, strutR_bot.y), end = Offset(strutR_top.x, strutR_top.y), strokeWidth = 2.5f)
             }
-            // Wing blade
-            drawLine(color = accentColor, start = Offset(wingL.x, wingL.y), end = Offset(wingR.x, wingR.y), strokeWidth = 5f, cap = StrokeCap.Round)
+            drawLine(color = accentColor, start = Offset(wingL.x, wingL.y), end = Offset(wingR.x, wingR.y), strokeWidth = 4.5f, cap = StrokeCap.Round)
         }
 
-        // 6. Dual 3D Nitro Exhaust Flames (if active)
+        // 6. Dual 3D Nitro Exhaust Flames
         if (physics.isNitroActive) {
-            val exL = projectCarPoint(-length * 0.52f, -width * 0.22f, 4f)
-            val exR = projectCarPoint(-length * 0.52f, width * 0.22f, 4f)
-            val flameFwd = -length * 0.52f - (35f + sin(System.currentTimeMillis() / 25.0).toFloat() * 12f)
+            val exL = projectCarPoint(-length * 0.5f, -width * 0.22f, 4f)
+            val exR = projectCarPoint(-length * 0.5f, width * 0.22f, 4f)
+            val flameFwd = -length * 0.5f - (32f + sin(System.currentTimeMillis() / 25.0).toFloat() * 10f)
             val flameEndL = projectCarPoint(flameFwd, -width * 0.22f, 4f)
             val flameEndR = projectCarPoint(flameFwd, width * 0.22f, 4f)
 
             if (exL.isVisible && flameEndL.isVisible) {
-                drawLine(color = NitroBlue, start = Offset(exL.x, exL.y), end = Offset(flameEndL.x, flameEndL.y), strokeWidth = 7f, cap = StrokeCap.Round)
-                drawLine(color = Color.White, start = Offset(exL.x, exL.y), end = Offset(flameEndL.x, flameEndL.y), strokeWidth = 3f, cap = StrokeCap.Round)
+                drawLine(color = NitroBlue, start = Offset(exL.x, exL.y), end = Offset(flameEndL.x, flameEndL.y), strokeWidth = 6f, cap = StrokeCap.Round)
+                drawLine(color = Color.White, start = Offset(exL.x, exL.y), end = Offset(flameEndL.x, flameEndL.y), strokeWidth = 2.5f, cap = StrokeCap.Round)
             }
             if (exR.isVisible && flameEndR.isVisible) {
-                drawLine(color = NitroBlue, start = Offset(exR.x, exR.y), end = Offset(flameEndR.x, flameEndR.y), strokeWidth = 7f, cap = StrokeCap.Round)
-                drawLine(color = Color.White, start = Offset(exR.x, exR.y), end = Offset(flameEndR.x, flameEndR.y), strokeWidth = 3f, cap = StrokeCap.Round)
+                drawLine(color = NitroBlue, start = Offset(exR.x, exR.y), end = Offset(flameEndR.x, flameEndR.y), strokeWidth = 6f, cap = StrokeCap.Round)
+                drawLine(color = Color.White, start = Offset(exR.x, exR.y), end = Offset(flameEndR.x, flameEndR.y), strokeWidth = 2.5f, cap = StrokeCap.Round)
             }
         }
     }
@@ -678,7 +637,7 @@ class GameCanvasRenderer {
         val w2 = projectFn(fwd + radius * cosS, side, radius)
 
         if (w1.isVisible && w2.isVisible) {
-            val tireWidth = (width * 320f / w1.depth).coerceIn(4f, 16f)
+            val tireWidth = (width * 300f / w1.depth).coerceIn(3.5f, 14f)
             drawLine(
                 color = Color(0xFF0F1116),
                 start = Offset(w1.x, w1.y),
@@ -686,7 +645,6 @@ class GameCanvasRenderer {
                 strokeWidth = tireWidth,
                 cap = StrokeCap.Round
             )
-            // Metallic rim center
             val midX = (w1.x + w2.x) * 0.5f
             val midY = (w1.y + w2.y) * 0.5f
             drawCircle(
@@ -701,7 +659,7 @@ class GameCanvasRenderer {
         for (s in physics.sparkParticles) {
             val pt = cam.project(s.x, s.y, s.z)
             if (pt.isVisible) {
-                val sparkRadius = (65f / pt.depth).coerceIn(2f, 6f)
+                val sparkRadius = (60f / pt.depth).coerceIn(2f, 5f)
                 drawCircle(
                     color = Color(s.color),
                     radius = sparkRadius,
@@ -715,7 +673,7 @@ class GameCanvasRenderer {
         for (pop in physics.floatPopups) {
             val pt = cam.project(pop.x, pop.y, pop.z + pop.offsetY * -0.4f)
             if (pt.isVisible) {
-                val fontSize = (18f * cam.focalLength / pt.depth).coerceIn(12f, 32f)
+                val fontSize = (18f * cam.focalLength / pt.depth).coerceIn(11f, 28f)
                 val style = TextStyle(
                     color = Color(pop.color).copy(alpha = pop.alpha.coerceIn(0f, 1f)),
                     fontSize = fontSize.sp,

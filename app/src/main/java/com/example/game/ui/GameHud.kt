@@ -86,7 +86,7 @@ fun GameHud(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 24.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
@@ -95,7 +95,7 @@ fun GameHud(
                 IconButton(
                     onClick = onPauseClick,
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
                         .background(RacingCard.copy(alpha = 0.85f))
                         .border(1.dp, Color(0x33FFFFFF), CircleShape)
@@ -123,7 +123,7 @@ fun GameHud(
                     Text(
                         text = timeDisplay,
                         color = if (sessionRemainingTime < 15f && !mode.defaultTimeLimitSec.isInfinite()) NeonRed else NeonCyan,
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Black
                     )
 
@@ -131,14 +131,14 @@ fun GameHud(
                         Text(
                             text = "LAP ${physics.completedLaps + 1}/${mode.targetLaps}",
                             color = TextMuted,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     } else {
                         Text(
                             text = mode.title,
                             color = TextMuted,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -150,20 +150,20 @@ fun GameHud(
                 Text(
                     text = "DRIFT SCORE",
                     color = TextMuted,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
                 Text(
                     text = "${scoring.totalScore}",
                     color = Color.White,
-                    fontSize = 26.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
             }
 
             // Right: MiniMap
-            MiniMap(physics = physics, track = track)
+            MiniMap(physics = physics, track = track, modifier = Modifier.size(85.dp))
         }
 
         // ================= CENTER DRIFT COMBO BANNER =================
@@ -172,8 +172,8 @@ fun GameHud(
             enter = fadeIn() + scaleIn(initialScale = 0.85f),
             exit = fadeOut() + scaleOut(targetScale = 0.85f),
             modifier = Modifier
-                .align(Alignment.Center)
-                .padding(bottom = 120.dp)
+                .align(Alignment.TopCenter)
+                .padding(top = 54.dp)
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
