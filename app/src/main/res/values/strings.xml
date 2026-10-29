@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Drift Horizon</string>
+    <string name="play_game">Start Drift</string>
+    <string name="garage">Garage</string>
+    <string name="tracks">Tracks</string>
+    <string name="records">Records</string>
+    <string name="settings">Settings</string>
+    <string name="handbrake">HANDBRAKE</string>
+    <string name="nitro">NITRO</string>
+    <string name="drift_score">DRIFT SCORE</string>
+    <string name="best_score">BEST SCORE</string>
+    <string name="multiplier">MULTIPLIER</string>
+    <string name="game_over">SESSION COMPLETE</string>
+    <string name="retry">Drift Again</string>
+    <string name="exit_to_menu">Main Menu</string>
+</resources>

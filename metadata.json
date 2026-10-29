@@ -1,0 +1,6 @@
+{
+  "name": "Drift Horizon",
+  "description": "High-octane arcade car drift game featuring physics-driven slides, multiple tracks, customizable tuned drift cars, and thrilling combo challenges.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
