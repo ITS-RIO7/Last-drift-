@@ -47,7 +47,8 @@ class GameCanvasRenderer {
     fun draw(
         drawScope: DrawScope,
         physics: DriftPhysicsEngine,
-        textMeasurer: TextMeasurer
+        textMeasurer: TextMeasurer,
+        cameraMode: com.example.game.model.CameraMode = com.example.game.model.CameraMode.CHASE
     ) {
         val now = System.nanoTime()
         val dt = if (lastTimeNanos == 0L) 0.016f else ((now - lastTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.04f)
@@ -57,7 +58,7 @@ class GameCanvasRenderer {
             val w = size.width
             val h = size.height
 
-            // Update 3D Chase Camera to capture the realistic low-angle rear drift view
+            // Update 3D Camera with selected camera mode
             camera3D.update(
                 carX = physics.posX,
                 carY = physics.posY,
@@ -68,7 +69,8 @@ class GameCanvasRenderer {
                 bodyRoll = physics.bodyRollAngle,
                 w = w,
                 h = h,
-                dt = dt
+                dt = dt,
+                cameraMode = cameraMode
             )
 
             // 1. Draw Realistic Dusk / Sunset City Atmosphere Sky
@@ -366,72 +368,96 @@ class GameCanvasRenderer {
     }
 
     // =========================================================================
-    // 3. 3D ELEVATED HIGHWAY ROAD & LANE MARKINGS
+    // 3. 3D ELEVATED HIGHWAY ROAD & LANE MARKINGS (Continuous Spline Ribbons)
     // =========================================================================
     private fun DrawScope.draw3DElevatedHighwayRoad(track: Track, cam: Game3DCamera) {
-        val center = track.centerLine
-        val inner = track.innerBoundary
-        val outer = track.outerBoundary
-        val numSegments = minOf(center.size, inner.size, outer.size)
-        if (numSegments < 2) return
+        val slices = track.roadSlices
+        val numSlices = slices.size
+        if (numSlices < 2) return
 
-        val maxDistSq = 1400f * 1400f
+        val maxDistSq = 1600f * 1600f
+        val roadColor = Color(track.roadColor)
+        val asphaltDark = Color(0xFF1E242F)
+        val curbRed = Color(track.curbColor)
 
-        for (i in 0 until numSegments - 1) {
-            val nextIdx = (i + 1) % numSegments
+        // Draw in forward order along the track ribbon
+        for (i in 0 until numSlices) {
+            val nextIdx = (i + 1) % numSlices
+            val s1 = slices[i]
+            val s2 = slices[nextIdx]
 
-            val dx = center[i].x - cam.posX
-            val dy = center[i].y - cam.posY
+            val dx = s1.cx - cam.posX
+            val dy = s1.cy - cam.posY
             if (dx * dx + dy * dy > maxDistSq) continue
 
-            val o1 = cam.project(outer[i].x, outer[i].y, 0f)
-            val o2 = cam.project(outer[nextIdx].x, outer[nextIdx].y, 0f)
-            val i1 = cam.project(inner[i].x, inner[i].y, 0f)
-            val i2 = cam.project(inner[nextIdx].x, inner[nextIdx].y, 0f)
+            // 1. Draw Asphalt Surface Quad
+            val quadDrawn = cam.projectQuadClipped(
+                p0x = s1.ox, p0y = s1.oy, p0z = 0f,
+                p1x = s2.ox, p1y = s2.oy, p1z = 0f,
+                p2x = s2.ix, p2y = s2.iy, p2z = 0f,
+                p3x = s1.ix, p3y = s1.iy, p3z = 0f,
+                outPath = reusableRoadPath
+            )
 
-            if (!o1.isVisible && !o2.isVisible && !i1.isVisible && !i2.isVisible) continue
+            if (quadDrawn) {
+                // Alternating subtle asphalt shade for texture feel
+                val segColor = if (i % 2 == 0) roadColor else asphaltDark
+                drawPath(path = reusableRoadPath, color = segColor)
 
-            // 3D Road Quad (Dark Asphalt)
-            reusableRoadPath.reset()
-            reusableRoadPath.moveTo(o1.x, o1.y)
-            reusableRoadPath.lineTo(o2.x, o2.y)
-            reusableRoadPath.lineTo(i2.x, i2.y)
-            reusableRoadPath.lineTo(i1.x, i1.y)
-            reusableRoadPath.close()
+                // Outer Curb (Alternating Red & White Rumble Strip at apexes)
+                if (s1.isApexCurb) {
+                    val curbColorVal = if ((i / 2) % 2 == 0) curbRed else Color.White
+                    val curbDrawn = cam.projectQuadClipped(
+                        p0x = s1.obx, p0y = s1.oby, p0z = 0.5f,
+                        p1x = s2.obx, p1y = s2.oby, p1z = 0.5f,
+                        p2x = s2.ox, p2y = s2.oy, p2z = 0.5f,
+                        p3x = s1.ox, p3y = s1.oy, p3z = 0.5f,
+                        outPath = reusableRoadPath
+                    )
+                    if (curbDrawn) {
+                        drawPath(path = reusableRoadPath, color = curbColorVal)
+                    }
+                }
 
-            drawPath(path = reusableRoadPath, color = Color(track.roadColor))
-
-            // White Edge Solid Striping
-            if (o1.isVisible && o2.isVisible) {
-                drawLine(
-                    color = Color.White.copy(alpha = 0.85f),
-                    start = Offset(o1.x, o1.y),
-                    end = Offset(o2.x, o2.y),
-                    strokeWidth = (220f / o1.depth).coerceIn(2f, 6f)
-                )
-            }
-            if (i1.isVisible && i2.isVisible) {
-                drawLine(
-                    color = Color.White.copy(alpha = 0.85f),
-                    start = Offset(i1.x, i1.y),
-                    end = Offset(i2.x, i2.y),
-                    strokeWidth = (220f / i1.depth).coerceIn(2f, 6f)
-                )
-            }
-
-            // White Dashed Highway Center Lane Markings
-            if (i % 2 == 0) {
-                val c1 = cam.project(center[i].x, center[i].y, 0.4f)
-                val c2 = cam.project(center[nextIdx].x, center[nextIdx].y, 0.4f)
-                if (c1.isVisible && c2.isVisible) {
-                    val dashWidth = (260f / ((c1.depth + c2.depth) * 0.5f)).coerceIn(2.5f, 7.5f)
+                // 2. Solid White Boundary Edge Lines
+                val outerEdge = cam.projectLineClipped(s1.ox, s1.oy, 0.4f, s2.ox, s2.oy, 0.4f)
+                outerEdge?.let { (p1, p2) ->
+                    val dist = kotlin.math.hypot(s1.cx - cam.posX, s1.cy - cam.posY).coerceAtLeast(10f)
+                    val strokeW = (280f / dist).coerceIn(2.5f, 7f)
                     drawLine(
                         color = Color.White.copy(alpha = 0.95f),
-                        start = Offset(c1.x, c1.y),
-                        end = Offset(c2.x, c2.y),
-                        strokeWidth = dashWidth,
-                        cap = StrokeCap.Square
+                        start = p1,
+                        end = p2,
+                        strokeWidth = strokeW
                     )
+                }
+
+                val innerEdge = cam.projectLineClipped(s1.ix, s1.iy, 0.4f, s2.ix, s2.iy, 0.4f)
+                innerEdge?.let { (p1, p2) ->
+                    val dist = kotlin.math.hypot(s1.cx - cam.posX, s1.cy - cam.posY).coerceAtLeast(10f)
+                    val strokeW = (280f / dist).coerceIn(2.5f, 7f)
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.95f),
+                        start = p1,
+                        end = p2,
+                        strokeWidth = strokeW
+                    )
+                }
+
+                // 3. Dashed White Center Lane Line
+                if (s1.isDashed) {
+                    val centerLineSeg = cam.projectLineClipped(s1.cx, s1.cy, 0.5f, s2.cx, s2.cy, 0.5f)
+                    centerLineSeg?.let { (p1, p2) ->
+                        val dist = kotlin.math.hypot(s1.cx - cam.posX, s1.cy - cam.posY).coerceAtLeast(10f)
+                        val strokeW = (320f / dist).coerceIn(3f, 8f)
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.95f),
+                            start = p1,
+                            end = p2,
+                            strokeWidth = strokeW,
+                            cap = StrokeCap.Square
+                        )
+                    }
                 }
             }
         }
@@ -442,58 +468,81 @@ class GameCanvasRenderer {
     // =========================================================================
     private fun DrawScope.draw3DConcreteParapetBarriers(track: Track, cam: Game3DCamera) {
         val barrierH = 10f // height in 3D world units
-        val maxDistSq = 1200f * 1200f
+        val slices = track.roadSlices
+        val n = slices.size
+        if (n < 2) return
 
-        fun drawBarrierWall(boundary: List<com.example.game.model.TrackPoint>, isOuter: Boolean) {
-            val n = boundary.size
-            if (n < 2) return
+        val maxDistSq = 1400f * 1400f
+        val wallColor = Color(0xFFCBD5E1)
+        val capColor = Color(0xFFE2E8F0)
+        val reflectorColor = Color(0xFFFF9100)
 
-            for (i in 0 until n - 1) {
-                val nextIdx = (i + 1) % n
+        // Outer Barriers
+        for (i in 0 until n) {
+            val nextIdx = (i + 1) % n
+            val s1 = slices[i]
+            val s2 = slices[nextIdx]
 
-                val dx = boundary[i].x - cam.posX
-                val dy = boundary[i].y - cam.posY
-                if (dx * dx + dy * dy > maxDistSq) continue
+            val dx = s1.cx - cam.posX
+            val dy = s1.cy - cam.posY
+            if (dx * dx + dy * dy > maxDistSq) continue
 
-                val b1 = cam.project(boundary[i].x, boundary[i].y, 0f)
-                val b2 = cam.project(boundary[nextIdx].x, boundary[nextIdx].y, 0f)
-                val t1 = cam.project(boundary[i].x, boundary[i].y, barrierH)
-                val t2 = cam.project(boundary[nextIdx].x, boundary[nextIdx].y, barrierH)
+            // Outer Barrier Wall
+            val outerWallDrawn = cam.projectQuadClipped(
+                p0x = s1.obx, p0y = s1.oby, p0z = 0f,
+                p1x = s2.obx, p1y = s2.oby, p1z = 0f,
+                p2x = s2.obx, p2y = s2.oby, p2z = barrierH,
+                p3x = s1.obx, p3y = s1.oby, p3z = barrierH,
+                outPath = reusableBarrierPath
+            )
+            if (outerWallDrawn) {
+                drawPath(path = reusableBarrierPath, color = wallColor)
 
-                if (!b1.isVisible && !b2.isVisible && !t1.isVisible && !t2.isVisible) continue
-
-                // Concrete Wall Vertical Quad
-                reusableBarrierPath.reset()
-                reusableBarrierPath.moveTo(b1.x, b1.y)
-                reusableBarrierPath.lineTo(b2.x, b2.y)
-                reusableBarrierPath.lineTo(t2.x, t2.y)
-                reusableBarrierPath.lineTo(t1.x, t1.y)
-                reusableBarrierPath.close()
-
-                drawPath(path = reusableBarrierPath, color = Color(0xFFCBD5E1))
-
-                // Concrete top cap
-                if (t1.isVisible && t2.isVisible) {
+                // Top rim
+                val topEdge = cam.projectLineClipped(s1.obx, s1.oby, barrierH, s2.obx, s2.oby, barrierH)
+                topEdge?.let { (p1, p2) ->
+                    val dist = kotlin.math.hypot(s1.cx - cam.posX, s1.cy - cam.posY).coerceAtLeast(10f)
                     drawLine(
-                        color = Color(0xFFE2E8F0),
-                        start = Offset(t1.x, t1.y),
-                        end = Offset(t2.x, t2.y),
-                        strokeWidth = (280f / t1.depth).coerceIn(2.5f, 8f)
+                        color = capColor,
+                        start = p1,
+                        end = p2,
+                        strokeWidth = (280f / dist).coerceIn(2.5f, 7f)
                     )
                 }
 
-                // Amber / Orange Warning Reflector Strips (as seen in reference image along barriers)
-                if (i % 2 == 1 && b1.isVisible && t1.isVisible) {
-                    val midX = (b1.x + t1.x) * 0.5f
-                    val midY = (b1.y + t1.y) * 0.5f
-                    val refRadius = (120f / b1.depth).coerceIn(2f, 5f)
-                    drawCircle(color = Color(0xFFFF9100), radius = refRadius, center = Offset(midX, midY))
+                // Amber warning reflector every 3 slices
+                if (i % 3 == 0) {
+                    val refPt = cam.project(s1.obx, s1.oby, barrierH * 0.5f)
+                    if (refPt.isVisible) {
+                        val refR = (130f / refPt.depth).coerceIn(2f, 5.5f)
+                        drawCircle(color = reflectorColor, radius = refR, center = Offset(refPt.x, refPt.y))
+                    }
+                }
+            }
+
+            // Inner Barrier Wall
+            val innerWallDrawn = cam.projectQuadClipped(
+                p0x = s1.ibx, p0y = s1.iby, p0z = 0f,
+                p1x = s2.ibx, p1y = s2.iby, p1z = 0f,
+                p2x = s2.ibx, p2y = s2.iby, p2z = barrierH,
+                p3x = s1.ibx, p3y = s1.iby, p3z = barrierH,
+                outPath = reusableBarrierPath
+            )
+            if (innerWallDrawn) {
+                drawPath(path = reusableBarrierPath, color = wallColor.copy(alpha = 0.95f))
+
+                val topEdge = cam.projectLineClipped(s1.ibx, s1.iby, barrierH, s2.ibx, s2.iby, barrierH)
+                topEdge?.let { (p1, p2) ->
+                    val dist = kotlin.math.hypot(s1.cx - cam.posX, s1.cy - cam.posY).coerceAtLeast(10f)
+                    drawLine(
+                        color = capColor,
+                        start = p1,
+                        end = p2,
+                        strokeWidth = (280f / dist).coerceIn(2.5f, 7f)
+                    )
                 }
             }
         }
-
-        drawBarrierWall(track.outerBoundary, isOuter = true)
-        drawBarrierWall(track.innerBoundary, isOuter = false)
     }
 
     // =========================================================================
@@ -668,6 +717,11 @@ class GameCanvasRenderer {
         cam: Game3DCamera,
         textMeasurer: TextMeasurer
     ) {
+        // In Hood or Bumper camera mode, the camera is placed at the front/hood so skip drawing interior/rear body
+        if (cam.mode == com.example.game.model.CameraMode.HOOD || cam.mode == com.example.game.model.CameraMode.BUMPER) {
+            return
+        }
+
         val car = physics.car
         val cx = physics.posX
         val cy = physics.posY

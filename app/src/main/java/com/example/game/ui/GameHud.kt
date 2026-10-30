@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -42,6 +43,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.game.model.CameraMode
 import com.example.game.model.GameMode
 import com.example.game.model.Track
 import com.example.game.physics.DriftPhysicsEngine
@@ -67,6 +69,8 @@ fun GameHud(
     track: Track,
     mode: GameMode,
     sessionRemainingTime: Float,
+    cameraMode: CameraMode = CameraMode.CHASE,
+    onCameraModeClick: () -> Unit = {},
     onPauseClick: () -> Unit,
     // Controller state setters
     onSteerLeftChange: (Boolean) -> Unit,
@@ -162,8 +166,51 @@ fun GameHud(
                 )
             }
 
-            // Right: MiniMap
-            MiniMap(physics = physics, track = track, modifier = Modifier.size(85.dp))
+            // Right: Camera Switcher & MiniMap
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Interactive Camera Mode Toggle Button
+                Surface(
+                    onClick = onCameraModeClick,
+                    shape = RoundedCornerShape(12.dp),
+                    color = RacingCard.copy(alpha = 0.85f),
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, NeonCyan),
+                    modifier = Modifier
+                        .height(44.dp)
+                        .testTag("camera_mode_button")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = "Change Camera View",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column {
+                            Text(
+                                text = "CAM: ${cameraMode.title}",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Text(
+                                text = cameraMode.subtitle,
+                                color = NeonYellow,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                MiniMap(physics = physics, track = track, modifier = Modifier.size(76.dp))
+            }
         }
 
         // ================= CENTER DRIFT COMBO BANNER =================

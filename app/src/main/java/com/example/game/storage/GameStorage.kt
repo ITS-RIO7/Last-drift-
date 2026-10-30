@@ -31,6 +31,10 @@ class GameStorage(context: Context) {
         get() = prefs.getFloat("steering_sensitivity", 1.0f)
         set(value) = prefs.edit().putFloat("steering_sensitivity", value).apply()
 
+    var cameraModeIndex: Int
+        get() = prefs.getInt("camera_mode_idx", 0)
+        set(value) = prefs.edit().putInt("camera_mode_idx", value).apply()
+
     fun isCarUnlocked(carId: String): Boolean {
         if (carId == "car_rod42" || carId == "car_86") return true
         return prefs.getBoolean("car_unlocked_$carId", false)

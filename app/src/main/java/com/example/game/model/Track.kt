@@ -52,6 +52,16 @@ data class CitySkybridge(
     val beamWidth: Float = 26f
 )
 
+data class RoadSlice(
+    val cx: Float, val cy: Float,
+    val ox: Float, val oy: Float,
+    val ix: Float, val iy: Float,
+    val obx: Float, val oby: Float,
+    val ibx: Float, val iby: Float,
+    val isDashed: Boolean = false,
+    val isApexCurb: Boolean = false
+)
+
 data class Track(
     val id: String,
     val name: String,
@@ -74,10 +84,104 @@ data class Track(
     val worldWidth: Float = 2400f,
     val worldHeight: Float = 2400f,
     val ambientColor: Long = 0xFF0D0F14,
-    val roadColor: Long = 0xFF1C202A,
-    val curbColor: Long = 0xFFFF1744,
-    val barrierGlowColor: Long = 0xFF00E5FF
+    val roadColor: Long = 0xFF242A36,
+    val curbColor: Long = 0xFFFF2A55,
+    val barrierGlowColor: Long = 0xFFFF9100
 ) {
+    val roadSlices: List<RoadSlice> by lazy {
+        if (centerLine.size < 3) return@lazy emptyList()
+
+        val points = if (centerLine.first() == centerLine.last() && centerLine.size > 2) {
+            centerLine.dropLast(1)
+        } else {
+            centerLine
+        }
+
+        val n = points.size
+        val slices = mutableListOf<RoadSlice>()
+        val halfW = roadWidth * 0.5f
+        val barrierOffset = halfW + 6f
+        var sliceCounter = 0
+
+        for (i in 0 until n) {
+            val p0 = points[(i - 1 + n) % n]
+            val p1 = points[i]
+            val p2 = points[(i + 1) % n]
+            val p3 = points[(i + 2) % n]
+
+            val segDx = p2.x - p1.x
+            val segDy = p2.y - p1.y
+            val segLen = kotlin.math.hypot(segDx, segDy).coerceAtLeast(10f)
+            val numSteps = (segLen / 24f).toInt().coerceIn(4, 25)
+
+            for (s in 0 until numSteps) {
+                val t = s.toFloat() / numSteps
+                val t2 = t * t
+                val t3 = t2 * t
+
+                // Catmull-Rom spline formulation
+                val cx = 0.5f * (
+                    (2f * p1.x) +
+                    (-p0.x + p2.x) * t +
+                    (2f * p0.x - 5f * p1.x + 4f * p2.x - p3.x) * t2 +
+                    (-p0.x + 3f * p1.x - 3f * p2.x + p3.x) * t3
+                )
+                val cy = 0.5f * (
+                    (2f * p1.y) +
+                    (-p0.y + p2.y) * t +
+                    (2f * p0.y - 5f * p1.y + 4f * p2.y - p3.y) * t2 +
+                    (-p0.y + 3f * p1.y - 3f * p2.y + p3.y) * t3
+                )
+
+                // Spline first derivative for tangent vector
+                val dX = 0.5f * (
+                    (-p0.x + p2.x) +
+                    2f * (2f * p0.x - 5f * p1.x + 4f * p2.x - p3.x) * t +
+                    3f * (-p0.x + 3f * p1.x - 3f * p2.x + p3.x) * t2
+                )
+                val dY = 0.5f * (
+                    (-p0.y + p2.y) +
+                    2f * (2f * p0.y - 5f * p1.y + 4f * p2.y - p3.y) * t +
+                    3f * (-p0.y + 3f * p1.y - 3f * p2.y + p3.y) * t2
+                )
+                val dLen = kotlin.math.hypot(dX, dY).coerceAtLeast(0.001f)
+                val nx = -dY / dLen
+                val ny = dX / dLen
+
+                val ox = cx + nx * halfW
+                val oy = cy + ny * halfW
+                val ix = cx - nx * halfW
+                val iy = cy - ny * halfW
+
+                val obx = cx + nx * barrierOffset
+                val oby = cy + ny * barrierOffset
+                val ibx = cx - nx * barrierOffset
+                val iby = cy - ny * barrierOffset
+
+                val isApex = clippingPoints.any { clip ->
+                    val dist = kotlin.math.hypot(clip.x - cx, clip.y - cy)
+                    dist < clip.radius * 1.25f
+                }
+
+                val isDashed = (sliceCounter % 4 < 2)
+                sliceCounter++
+
+                slices.add(
+                    RoadSlice(
+                        cx = cx, cy = cy,
+                        ox = ox, oy = oy,
+                        ix = ix, iy = iy,
+                        obx = obx, oby = oby,
+                        ibx = ibx, iby = iby,
+                        isDashed = isDashed,
+                        isApexCurb = isApex
+                    )
+                )
+            }
+        }
+        slices
+    }
+
     companion object {
         // Track 0: Rod City Expressway (Flagship Track from reference image)
         fun createRodCityTrack(): Track {

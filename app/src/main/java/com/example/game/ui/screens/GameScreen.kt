@@ -76,6 +76,13 @@ fun GameScreen(
     var frameTick by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     var remainingTimeSec by remember { mutableFloatStateOf(mode.defaultTimeLimitSec) }
 
+    // Camera mode state
+    val cameraModes = remember { com.example.game.model.CameraMode.entries }
+    var currentCameraMode by remember {
+        val savedIdx = storage.cameraModeIndex.coerceIn(0, cameraModes.size - 1)
+        mutableStateOf(cameraModes[savedIdx])
+    }
+
     // Session reset function
     fun restartSession() {
         physics.reset()
@@ -195,7 +202,8 @@ fun GameScreen(
             renderer.draw(
                 drawScope = this,
                 physics = physics,
-                textMeasurer = textMeasurer
+                textMeasurer = textMeasurer,
+                cameraMode = currentCameraMode
             )
         }
 
@@ -206,6 +214,12 @@ fun GameScreen(
             track = track,
             mode = mode,
             sessionRemainingTime = remainingTimeSec,
+            cameraMode = currentCameraMode,
+            onCameraModeClick = {
+                val nextMode = currentCameraMode.next()
+                currentCameraMode = nextMode
+                storage.cameraModeIndex = nextMode.ordinal
+            },
             onPauseClick = { isPaused = true },
             onSteerLeftChange = { steerLeft = it },
             onSteerRightChange = { steerRight = it },
