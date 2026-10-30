@@ -16,3 +16,7 @@
 local.properties
 .env
 debug.keystore
+
+# Ensure Gradle wrapper jar and keystore base64 are always tracked
+!gradle/wrapper/gradle-wrapper.jar
+!debug.keystore.base64

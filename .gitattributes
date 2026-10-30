@@ -1,0 +1,8 @@
+# Force Linux LF line endings for gradlew to prevent execution failure on GitHub runners
+* text=auto eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.keystore binary
+*.webp binary
+*.png binary
