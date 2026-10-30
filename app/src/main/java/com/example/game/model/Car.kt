@@ -30,11 +30,27 @@ data class Car(
     companion object {
         val DEFAULT_CARS = listOf(
             Car(
+                id = "car_rod42",
+                name = "Aeroblade ROD #42",
+                series = "Rod City Hyper-Spec",
+                description = "Flagship twin-turbo hyperdrift coupe featuring dual-tone sunset orange & cyan livery, sponsor decals, and championship tuning.",
+                basePrice = 0,
+                isUnlocked = true,
+                bodyColor = 0xFFFF6D00, // Metallic sunset orange
+                accentColor = 0xFF00B0FF, // Electric cyan livery
+                baseTopSpeed = 500f,
+                baseAcceleration = 440f,
+                baseHandling = 1.28f,
+                baseDriftFactor = 1.38f,
+                smokeColor = 0xFFE0F7FA, // Dense volumetric tire smoke
+                underglowColor = 0xFF00E5FF // Cyan neon rim & underglow
+            ),
+            Car(
                 id = "car_86",
                 name = "Hachi-86 FR",
                 series = "Touge Icon",
                 description = "Lightweight rear-wheel-drive legend. Exceptional balance and forgiving drift transitions.",
-                basePrice = 0,
+                basePrice = 1200,
                 isUnlocked = true,
                 bodyColor = 0xFFECEFF1, // Panda white
                 accentColor = 0xFF212121, // Panda black hood/sides

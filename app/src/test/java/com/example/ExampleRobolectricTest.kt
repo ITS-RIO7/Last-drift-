@@ -28,7 +28,8 @@ class ExampleRobolectricTest {
     @Test
     fun `test drift physics initialization and car update`() {
         val car = Car.DEFAULT_CARS[0]
-        val track = Track.createNeonCityTrack()
+        assertEquals("car_rod42", car.id)
+        val track = Track.createRodCityTrack()
         val physics = DriftPhysicsEngine(car = car, track = track)
 
         assertEquals(track.startX, physics.posX)

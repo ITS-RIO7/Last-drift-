@@ -63,6 +63,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -927,45 +928,58 @@ private fun DrawScope.draw3DShowcaseCar(
     // Front Face
     path.reset()
     path.moveTo(bFL.x, bFL.y); path.lineTo(bFR.x, bFR.y); path.lineTo(mFR.x, mFR.y); path.lineTo(mFL.x, mFL.y); path.close()
-    drawPath(path, bodyColor)
+    drawPath(path, accentColor) // Cyan front splitter
 
-    // Side Faces
+    // Side Faces (Lower in cyan, upper in orange)
     path.reset()
     path.moveTo(bFR.x, bFR.y); path.lineTo(bRR.x, bRR.y); path.lineTo(mRR.x, mRR.y); path.lineTo(mFR.x, mFR.y); path.close()
-    drawPath(path, bodyColor.copy(alpha = 0.85f))
+    drawPath(path, accentColor)
 
     path.reset()
     path.moveTo(bFL.x, bFL.y); path.lineTo(bRL.x, bRL.y); path.lineTo(mRL.x, mRL.y); path.lineTo(mFL.x, mFL.y); path.close()
-    drawPath(path, bodyColor.copy(alpha = 0.85f))
+    drawPath(path, accentColor)
 
-    // Rear Face
+    // Rear Face (Diffuser in cyan with red LED tail light)
     path.reset()
     path.moveTo(bRL.x, bRL.y); path.lineTo(bRR.x, bRR.y); path.lineTo(mRR.x, mRR.y); path.lineTo(mRL.x, mRL.y); path.close()
-    drawPath(path, bodyColor.copy(alpha = 0.75f))
+    drawPath(path, accentColor.copy(alpha = 0.85f))
+    drawLine(Color(0xFFFF1744), Offset(mRL.x * 0.9f + mRR.x * 0.1f, mRL.y * 0.9f + mRR.y * 0.1f), Offset(mRL.x * 0.1f + mRR.x * 0.9f, mRL.y * 0.1f + mRR.y * 0.9f), strokeWidth = 3f)
 
-    // Hood Deck
+    // Hood Deck (Metallic Sunset Orange)
     path.reset()
     path.moveTo(mFL.x, mFL.y); path.lineTo(mFR.x, mFR.y); path.lineTo(cFR.x, cFR.y); path.lineTo(cFL.x, cFL.y); path.close()
     drawPath(path, bodyColor)
+    // Cyan center stripe
+    drawLine(accentColor, Offset((mFL.x + mFR.x) * 0.5f, (mFL.y + mFR.y) * 0.5f), Offset((cFL.x + cFR.x) * 0.5f, (cFL.y + cFR.y) * 0.5f), strokeWidth = 5f)
 
-    // Windshield
+    // Windshield (Tinted Glass)
     path.reset()
     path.moveTo(mFL.x * 0.7f + cFL.x * 0.3f, mFL.y * 0.7f + cFL.y * 0.3f)
     path.lineTo(mFR.x * 0.7f + cFR.x * 0.3f, mFR.y * 0.7f + cFR.y * 0.3f)
     path.lineTo(cFR.x, cFR.y)
     path.lineTo(cFL.x, cFL.y)
     path.close()
-    drawPath(path, Color(0xFF1E293B))
+    drawPath(path, Color(0xFF0F172A))
 
-    // Roof
+    // Roof (Sunset Orange)
     path.reset()
     path.moveTo(cFL.x, cFL.y); path.lineTo(cFR.x, cFR.y); path.lineTo(cRR.x, cRR.y); path.lineTo(cRL.x, cRL.y); path.close()
     drawPath(path, bodyColor)
-    // Accent Stripe
-    drawLine(accentColor, Offset((cFL.x + cFR.x) * 0.5f, (cFL.y + cFR.y) * 0.5f), Offset((cRL.x + cRR.x) * 0.5f, (cRL.y + cRR.y) * 0.5f), strokeWidth = 5f)
 
-    // Rear Spoiler Wing
-    val sL = isoProject(-length * 0.5f, -width * 0.5f, roofH + 4f)
-    val sR = isoProject(-length * 0.5f, width * 0.5f, roofH + 4f)
-    drawLine(accentColor, sL, sR, strokeWidth = 4f)
+    // Rear Trunk Deck
+    path.reset()
+    path.moveTo(cRL.x, cRL.y); path.lineTo(cRR.x, cRR.y); path.lineTo(mRR.x, mRR.y); path.lineTo(mRL.x, mRL.y); path.close()
+    drawPath(path, bodyColor)
+
+    // Carbon-Fiber Rear Spoiler Wing
+    val sL_bot = isoProject(-length * 0.44f, -width * 0.24f, bodyH)
+    val sL_top = isoProject(-length * 0.44f, -width * 0.24f, roofH + 5f)
+    val sR_bot = isoProject(-length * 0.44f, width * 0.24f, bodyH)
+    val sR_top = isoProject(-length * 0.44f, width * 0.24f, roofH + 5f)
+    val sL = isoProject(-length * 0.52f, -width * 0.52f, roofH + 5f)
+    val sR = isoProject(-length * 0.52f, width * 0.52f, roofH + 5f)
+
+    drawLine(Color(0xFF0F172A), sL_bot, sL_top, strokeWidth = 2.5f)
+    drawLine(Color(0xFF0F172A), sR_bot, sR_top, strokeWidth = 2.5f)
+    drawLine(accentColor, sL, sR, strokeWidth = 5f, cap = StrokeCap.Round)
 }

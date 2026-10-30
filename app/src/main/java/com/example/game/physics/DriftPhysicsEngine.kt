@@ -308,6 +308,10 @@ class DriftPhysicsEngine(
     }
 
     private fun handleCollisions(dt: Float) {
+        // Test track concrete barriers (inner and outer guardrails)
+        checkBarrierCollision(track.innerBoundary)
+        checkBarrierCollision(track.outerBoundary)
+
         // Test world boundaries
         val margin = 50f
         if (posX < margin) {
@@ -339,6 +343,48 @@ class DriftPhysicsEngine(
                     vy = -vy * 0.4f
                 }
                 triggerWallTap()
+            }
+        }
+    }
+
+    private fun checkBarrierCollision(boundary: List<TrackPoint>) {
+        if (boundary.size < 2) return
+        val carRadius = carWidth * 0.55f
+
+        for (i in 0 until boundary.size - 1) {
+            val p1 = boundary[i]
+            val p2 = boundary[i + 1]
+
+            val segDx = p2.x - p1.x
+            val segDy = p2.y - p1.y
+            val segLenSq = segDx * segDx + segDy * segDy
+            if (segLenSq < 1f) continue
+
+            val t = (((posX - p1.x) * segDx + (posY - p1.y) * segDy) / segLenSq).coerceIn(0f, 1f)
+            val closestX = p1.x + t * segDx
+            val closestY = p1.y + t * segDy
+
+            val distDx = posX - closestX
+            val distDy = posY - closestY
+            val distSq = distDx * distDx + distDy * distDy
+
+            if (distSq < carRadius * carRadius) {
+                val dist = hypot(distDx, distDy).coerceAtLeast(0.001f)
+                val normalX = distDx / dist
+                val normalY = distDy / dist
+                val penetration = carRadius - dist
+
+                posX += normalX * penetration
+                posY += normalY * penetration
+
+                val vDotN = vx * normalX + vy * normalY
+                if (vDotN < 0f) {
+                    vx -= (1f + 0.35f) * vDotN * normalX
+                    vy -= (1f + 0.35f) * vDotN * normalY
+                    vx *= 0.94f
+                    vy *= 0.94f
+                    triggerWallTap()
+                }
             }
         }
     }

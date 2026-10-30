@@ -12,11 +12,11 @@ class GameStorage(context: Context) {
         set(value) = prefs.edit().putInt("player_coins", value).apply()
 
     var equippedCarId: String
-        get() = prefs.getString("equipped_car_id", "car_86") ?: "car_86"
+        get() = prefs.getString("equipped_car_id", "car_rod42") ?: "car_rod42"
         set(value) = prefs.edit().putString("equipped_car_id", value).apply()
 
     var selectedTrackId: String
-        get() = prefs.getString("selected_track_id", "track_neon_city") ?: "track_neon_city"
+        get() = prefs.getString("selected_track_id", "track_rod_city") ?: "track_rod_city"
         set(value) = prefs.edit().putString("selected_track_id", value).apply()
 
     var soundEnabled: Boolean
@@ -32,7 +32,7 @@ class GameStorage(context: Context) {
         set(value) = prefs.edit().putFloat("steering_sensitivity", value).apply()
 
     fun isCarUnlocked(carId: String): Boolean {
-        if (carId == "car_86") return true
+        if (carId == "car_rod42" || carId == "car_86") return true
         return prefs.getBoolean("car_unlocked_$carId", false)
     }
 
